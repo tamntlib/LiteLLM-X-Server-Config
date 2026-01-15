@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+.env*
+!.env.example
+llmproxy-backup
+cli_proxy_api*.yaml
+!cli_proxy_api.example.yaml
+litellm-scripts/litellm_openapi.json

@@ -1,0 +1,113 @@
+# Environment variables
+# LETSENCRYPT_EMAIL=
+# PORTAINER_HOST=
+
+services:
+  traefik:
+    image: traefik:v3.6.6
+    command:
+      # Entrypoints
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+
+      # HTTP -> HTTPS redirect
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+
+      # Swarm provider (Traefik v3)
+      - --providers.swarm=true
+      - --providers.swarm.exposedbydefault=false
+      - --providers.swarm.network=public
+
+      # (Optional) dashboard on :8080, you can remove if you don't want it
+      - --api.dashboard=true
+
+      # Let's Encrypt (ACME)
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.httpchallenge=true
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.httpchallenge.entrypoint=web
+
+      # Logs
+      - --log.level=ERROR
+
+    ports:
+      # Use LONG SYNTAX to enable host mode: bypasses Swarm Mesh (SNAT) 
+      # to preserve the real Client IP in X-Forwarded-For headers.
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+      # (Optional) dashboard: http://node-ip:8080
+      # - "8080:8080"
+    networks:
+      - public
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik_letsencrypt_data:/letsencrypt"
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  agent:
+    image: portainer/agent:lts
+    environment:
+      AGENT_CLUSTER_ADDR: tasks.agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - agent_network
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.platform.os == linux
+
+  portainer:
+    image: portainer/portainer-ce:lts
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    volumes:
+      - portainer_data:/data
+    networks:
+      - public
+      - agent_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+
+        # Portainer UI (HTTPS)
+        - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
+        - "traefik.http.routers.portainer.entrypoints=websecure"
+        - "traefik.http.routers.portainer.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}"
+        - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+        - "traefik.http.routers.portainer.service=portainer"
+
+        # (Optional) Edge (HTTPS) - only needed when you use Portainer Edge Agents to connect remote Docker/Kubernetes hosts back to your Portainer server
+        # - "traefik.http.routers.edge.rule=Host(`${PORTAINER_EDGE_HOST}`)"
+        # - "traefik.http.routers.edge.entrypoints=websecure"
+        # - "traefik.http.routers.edge.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}"
+        # - "traefik.http.services.edge.loadbalancer.server.port=8000"
+        # - "traefik.http.routers.edge.service=edge"
+
+networks:
+  public:
+    name: public
+    driver: overlay
+    attachable: true
+  agent_network:
+    driver: overlay
+
+volumes:
+  portainer_data:
+  traefik_letsencrypt_data:
