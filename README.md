@@ -51,7 +51,7 @@ Add the following records to your DNS:
 #### Set environment variables
 
 Copy .env.example to .env and fill in the values
-Copy cli_proxy_api.example.yaml to cli_proxy_api.yaml, cli_proxy_api_2.yaml and fill in the values (secret-key, ...)
+In configs folder, copy cli_proxy_api.example.yaml to cli_proxy_api.yaml, cli_proxy_api_2.yaml and fill in the values (secret-key, ...)
 
 > **Note:** If you don't need `cli-proxy-api-2`, you can skip creating `cli_proxy_api_2.yaml` and remove the related DNS record, config set command, and service from `llmproxy.yaml`.
 
@@ -62,9 +62,9 @@ export PORTAINER_URL=https://portainer.example.com
 export PORTAINER_ACCESS_TOKEN=<token>
 
 # Set config
-ptctools config set -u $PORTAINER_URL -n cli_proxy_api_config_yaml -f 'cli_proxy_api.yaml'
-ptctools config set -u $PORTAINER_URL -n cli_proxy_api_2_config_yaml -f 'cli_proxy_api_2.yaml'
-ptctools config set -u $PORTAINER_URL -n prometheus_yml -f 'prometheus.yml'
+ptctools config set -u $PORTAINER_URL -n llmproxy_cli_proxy_api_config_yaml -f 'configs/cli_proxy_api.yaml'
+ptctools config set -u $PORTAINER_URL -n llmproxy_cli_proxy_api_2_config_yaml -f 'configs/cli_proxy_api_2.yaml'
+ptctools config set -u $PORTAINER_URL -n llmproxy_litellm_config_yaml -f 'configs/litellm.yaml'
 
 # Deploy stack
 ptctools stack deploy -u $PORTAINER_URL -n llmproxy -f 'llmproxy.yaml' --ownership team

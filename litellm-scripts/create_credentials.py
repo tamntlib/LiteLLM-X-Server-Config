@@ -9,7 +9,9 @@ load_dotenv()
 
 LITELLM_API_KEY = os.environ["LITELLM_API_KEY"]
 LITELLM_BASE_URL = os.environ["LITELLM_BASE_URL"]
-CLI_PROXY_API_CREDENTIAL_SERVICE_NAME = os.environ["CLI_PROXY_API_CREDENTIAL_SERVICE_NAME"]
+CLI_PROXY_API_CREDENTIAL_SERVICE_NAME = os.environ[
+    "CLI_PROXY_API_CREDENTIAL_SERVICE_NAME"
+]
 CLI_PROXY_API_KEY = os.environ["CLI_PROXY_API_KEY"]
 
 
@@ -29,6 +31,19 @@ def post_credential(data):
     except Exception as e:
         return str(e)
 
+
+print(
+    post_credential(
+        {
+            "credential_name": f"{CLI_PROXY_API_CREDENTIAL_SERVICE_NAME}-openai",
+            "credential_values": {
+                "api_key": CLI_PROXY_API_KEY,
+                "api_base": f"http://{CLI_PROXY_API_CREDENTIAL_SERVICE_NAME}:8317/v1",
+            },
+            "credential_info": {"custom_llm_provider": "OpenAI_Compatible"},
+        }
+    )
+)
 
 print(
     post_credential(

@@ -71,7 +71,7 @@ def create_user(email):
         sys.exit(1)
 
 
-def create_api_key(user_id, key_alias):
+def create_api_key(user_id, key_alias, key_value=None):
     """Create an API key for the given user."""
     payload = {
         "user_id": user_id,
@@ -81,6 +81,9 @@ def create_api_key(user_id, key_alias):
         "key_type": "llm_api",
         "metadata": {},
     }
+
+    if key_value:
+        payload["key"] = key_value
 
     data = json.dumps(payload).encode("utf-8")
 
@@ -104,10 +107,12 @@ def main():
     parser = argparse.ArgumentParser(description="Create LiteLLM user and API key")
     parser.add_argument("email", help="User email address")
     parser.add_argument("--alias", "-a", help="API key alias (default: email prefix)")
+    parser.add_argument("--key", "-k", help="Custom API key value (optional)")
     args = parser.parse_args()
 
     email = args.email
     key_alias = args.alias or email.split("@")[0]
+    key_value = args.key
 
     print(f"📧 Processing: {email}", file=sys.stderr)
 
@@ -125,7 +130,7 @@ def main():
 
     # Create API key
     print(f"🔑 Creating API key...", file=sys.stderr)
-    key_result = create_api_key(user_id, key_alias)
+    key_result = create_api_key(user_id, key_alias, key_value)
     api_key = key_result.get("key")
 
     print(f"✅ API key created", file=sys.stderr)

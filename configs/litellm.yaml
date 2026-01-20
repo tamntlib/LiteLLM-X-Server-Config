@@ -1,0 +1,30 @@
+general_settings:
+  proxy_batch_write_at: 60 # Batch write spend updates every 60s
+  database_connection_pool_limit: 10 # connection pool limit per worker process. Total connections = limit × workers × instances. Calculate: MAX_DB_CONNECTIONS / (instances × workers). Default: 10.
+
+router_settings:
+  routing_strategy: simple-shuffle
+  allowed_fails: 1
+  cooldown_time: 300
+  num_retries: 2
+  timeout: 600
+  retry_after: 0
+  fallbacks:
+    - claude-opus-4-5:
+        - anthropic/gemini-3-pro-preview
+        - openai/gemini-3-pro-preview
+    - claude-sonnet-4-5:
+        - anthropic/gemini-3-pro-preview
+        - openai/gemini-3-pro-preview
+    - claude-haiku-4-5:
+        - anthropic/gemini-3-flash-preview
+        - openai/gemini-3-flash-preview
+    - claude-opus-4-5-20251101:
+        - anthropic/gemini-3-pro-preview
+        - openai/gemini-3-pro-preview
+    - claude-sonnet-4-5-20250929:
+        - anthropic/gemini-3-pro-preview
+        - openai/gemini-3-pro-preview
+    - claude-haiku-4-5-20250929:
+        - anthropic/gemini-3-flash-preview
+        - openai/gemini-3-flash-preview

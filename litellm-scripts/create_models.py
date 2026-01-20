@@ -12,10 +12,31 @@ load_dotenv()
 LITELLM_API_KEY = os.environ["LITELLM_API_KEY"]
 LITELLM_BASE_URL = os.environ["LITELLM_BASE_URL"]
 LITELLM_ACTOR = os.environ["LITELLM_ACTOR"]
-LITELLM_MODEL_ACCESS_GROUPS = [x.strip() for x in os.getenv("LITELLM_MODEL_ACCESS_GROUPS", "").split(",") if x.strip()]
-CLI_PROXY_API_CREDENTIAL_SERVICE_NAME = os.environ["CLI_PROXY_API_CREDENTIAL_SERVICE_NAME"]
+LITELLM_MODEL_ACCESS_GROUPS = [
+    x.strip()
+    for x in os.getenv("LITELLM_MODEL_ACCESS_GROUPS", "").split(",")
+    if x.strip()
+]
+CLI_PROXY_API_CREDENTIAL_SERVICE_NAME = os.environ[
+    "CLI_PROXY_API_CREDENTIAL_SERVICE_NAME"
+]
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
+interfaces = ["openai", "gemini", "anthropic"]
+
+# Your list of models
+models_to_add = [
+    "gpt-oss-120b-medium",
+    "gemini-claude-sonnet-4-5",
+    "gemini-claude-sonnet-4-5-thinking",
+    "gemini-claude-opus-4-5-thinking",
+    "gemini-3-pro-image-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-computer-use-preview-10-2025",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+]
 
 # Fetch model prices from LiteLLM
 LITELLM_PRICES_URL = "https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_prices_and_context_window.json"
@@ -96,22 +117,8 @@ def extract_price_fields(price_data):
 # Fetch prices at startup
 MODEL_PRICES = fetch_model_prices()
 
-# Your list of models
-models_to_add = [
-    "gpt-oss-120b-medium",
-    "gemini-claude-sonnet-4-5",
-    "gemini-claude-sonnet-4-5-thinking",
-    "gemini-claude-opus-4-5-thinking",
-    "gemini-3-pro-image-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-computer-use-preview-10-2025",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-]
 
-
-def add_model(model_id):
+def add_model(interface, model_id):
     # Get price data for the model
     price_data = find_model_price(model_id, MODEL_PRICES)
     price_fields = extract_price_fields(price_data)
@@ -130,7 +137,11 @@ def add_model(model_id):
     )
 
     # Prepare the JSON payload
-    model_info = {"access_groups": LITELLM_MODEL_ACCESS_GROUPS} if LITELLM_MODEL_ACCESS_GROUPS else {}
+    model_info = (
+        {"access_groups": LITELLM_MODEL_ACCESS_GROUPS}
+        if LITELLM_MODEL_ACCESS_GROUPS
+        else {}
+    )
     model_info.update(price_fields)
     model_info.update(
         {
@@ -142,11 +153,11 @@ def add_model(model_id):
     )
 
     payload = {
-        "model_name": model_id,
+        "model_name": f"{interface}/{model_id}",
         "litellm_params": {
-            "model": f"{'anthropic' if 'claude' in model_id else 'gemini'}/{model_id}",
-            "custom_llm_provider": f"{'anthropic' if 'claude' in model_id else 'gemini'}",
-            "litellm_credential_name": f"{CLI_PROXY_API_CREDENTIAL_SERVICE_NAME}-{'anthropic' if 'claude' in model_id else 'gemini'}",
+            "model": f"{interface}/{model_id}",
+            "custom_llm_provider": f"{interface}",
+            "litellm_credential_name": f"{CLI_PROXY_API_CREDENTIAL_SERVICE_NAME}-{interface}",
         },
         "model_info": model_info,
     }
@@ -181,6 +192,8 @@ def add_model(model_id):
         print(f"❌ Network Error: {e}")
 
 
-# Execute loop
-for model in models_to_add:
-    add_model(model)
+if __name__ == "__main__":
+    # Execute loop
+    for interface in interfaces:
+        for model in models_to_add:
+            add_model(interface, model)

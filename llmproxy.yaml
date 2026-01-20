@@ -13,12 +13,11 @@ volumes:
   cli_proxy_api_2_auth_data:
   cli_proxy_api_2_config_data:
   db_data:
-  prometheus_data:
 
 x-common-healthcheck: &common-healthcheck
-  interval: 30s       # Perform health check every 30 seconds
-  timeout: 10s        # Health check command times out after 10 seconds
-  retries: 3          # Retry up to 3 times if health check fails
+  interval: 30s # Perform health check every 30 seconds
+  timeout: 10s # Health check command times out after 10 seconds
+  retries: 3 # Retry up to 3 times if health check fails
 
 x-common-deploy: &common-deploy
   replicas: 1
@@ -33,7 +32,7 @@ x-common-deploy: &common-deploy
     order: stop-first
 
 x-cli-proxy-api: &cli-proxy-api
-  image: eceasy/cli-proxy-api:v6.6.100
+  image: eceasy/cli-proxy-api:v6.7.11
   command:
     - sh
     - -c
@@ -99,10 +98,14 @@ services:
       - internal
     healthcheck:
       <<: *common-healthcheck
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-app} -d ${DB_NAME:-app} -p 5432"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-app} -d ${DB_NAME:-app} -p 5432",
+        ]
 
   litellm:
-    image: ghcr.io/berriai/litellm-database:main-v1.80.11-stable
+    image: ghcr.io/berriai/litellm-database:main-1.80.15-stable.1
     deploy:
       <<: *common-deploy
       labels:
@@ -111,43 +114,41 @@ services:
         - traefik.http.routers.litellm.entrypoints=websecure
         - traefik.http.routers.litellm.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
         - traefik.http.services.litellm.loadbalancer.server.port=4000
+    command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
       STORE_MODEL_IN_DB: "True" # allows adding models to proxy via UI
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-litellm_master_key}
-    healthcheck:  # Defines the health check configuration for the container
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-litellm_salt_key}
+      LITELLM_MODE: PRODUCTION
+      LITELLM_LOG: ERROR
+      JSON_LOGS: "True"
+      USE_PRISMA_MIGRATE: "True"
+      SEPARATE_HEALTH_APP: "1"
+      SEPARATE_HEALTH_PORT: "4001"
+      LITELLM_DROP_PARAMS: "True"
+    configs:
+      - source: litellm_config_yaml
+        target: /app/config.yaml
+    healthcheck: # Defines the health check configuration for the container
       <<: *common-healthcheck
       test:
         - CMD-SHELL
-        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"  # Command to execute for health check
-      start_period: 40s   # Wait 40 seconds after container start before beginning health checks
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4001/health/liveliness')" # Command to execute for health check
+      start_period: 40s # Wait 40 seconds after container start before beginning health checks
     networks:
       - internal
       - public
 
-  prometheus:
-    image: prom/prometheus:v3.9.1
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=15d"
-    volumes:
-      - prometheus_data:/prometheus
-    configs:
-      - source: prometheus_yml
-        target: /etc/prometheus/prometheus.yml
-    networks:
-      - internal
-
 configs:
   cli_proxy_api_config_yaml:
-    name: ${CLI_PROXY_API_CONFIG_NAME:-cli_proxy_api_config_yaml}
+    name: ${CLI_PROXY_API_CONFIG_NAME:-llmproxy_cli_proxy_api_config_yaml}
     external: true
   cli_proxy_api_2_config_yaml:
-    name: ${CLI_PROXY_API_2_CONFIG_NAME:-cli_proxy_api_2_config_yaml}
+    name: ${CLI_PROXY_API_2_CONFIG_NAME:-llmproxy_cli_proxy_api_2_config_yaml}
     external: true
-  prometheus_yml:
-    name: ${PROMETHEUS_CONFIG_NAME:-prometheus_yml}
+  litellm_config_yaml:
+    name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm_config_yaml}
     external: true
 
 networks:
