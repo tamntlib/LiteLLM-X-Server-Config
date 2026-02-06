@@ -1,18 +1,6 @@
-# Environment variables
-# DB_USER
-# DB_PASSWORD
-# DB_NAME
-# LITELLM_MASTER_KEY
-# LITELLM_HOST
-# CLI_PROXY_API_HOST
-# CLI_PROXY_API_2_HOST
-
+# Environment variables: follow .env.example file
 volumes:
-  cli_proxy_api_auth_data:
-  cli_proxy_api_config_data:
-  cli_proxy_api_2_auth_data:
-  cli_proxy_api_2_config_data:
-  db_data:
+  antigravity-manager-data:
 
 x-common-healthcheck: &common-healthcheck
   interval: 30s # Perform health check every 30 seconds
@@ -31,89 +19,42 @@ x-common-deploy: &common-deploy
     delay: 10s
     order: stop-first
 
-x-cli-proxy-api: &cli-proxy-api
-  image: eceasy/cli-proxy-api:v6.7.11
-  command:
-    - sh
-    - -c
-    - |
-      if [ ! -f /CLIProxyAPI/config/config.yaml ]; then
-        cp /CLIProxyAPI/config_ro/config.yaml /CLIProxyAPI/config/config.yaml
-      fi
-      exec ./CLIProxyAPI --config /CLIProxyAPI/config/config.yaml
+x-antigravity-manager: &antigravity-manager
+  image: lbjlaq/antigravity-manager:v4.1.5
   environment:
-    TZ: ${TZ:-UTC}
-  healthcheck:
-    <<: *common-healthcheck
-    test: ["CMD-SHELL", "wget -q --spider http://localhost:8317/ || exit 1"]
-    start_period: 10s
+    - API_KEY=${ANTIGRAVITY_MANAGER_API_KEY}
+    - WEB_PASSWORD=${ANTIGRAVITY_MANAGER_WEB_PASSWORD}
+    - ABV_MAX_BODY_SIZE=104857600
   networks:
     - internal
     - public
+    - monitoring
+  healthcheck:
+    <<: *common-healthcheck
+    test:
+      [
+        "CMD-SHELL",
+        "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8045/health')\"",
+      ]
+    start_period: 30s
 
 services:
-  cli-proxy-api:
-    <<: *cli-proxy-api
+  antigravity-manager:
+    <<: *antigravity-manager
     volumes:
-      - cli_proxy_api_config_data:/CLIProxyAPI/config
-      - cli_proxy_api_auth_data:/CLIProxyAPI/auth
-    configs:
-      - source: cli_proxy_api_config_yaml
-        target: /CLIProxyAPI/config_ro/config.yaml
+      - antigravity-manager-data:/root/.antigravity_tools
     deploy:
       <<: *common-deploy
       labels:
         - traefik.enable=true
-        - traefik.http.routers.cli-proxy-api.rule=Host(`${CLI_PROXY_API_HOST}`)
-        - traefik.http.routers.cli-proxy-api.entrypoints=websecure
-        - traefik.http.routers.cli-proxy-api.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
-        - traefik.http.services.cli-proxy-api.loadbalancer.server.port=8317
-
-  cli-proxy-api-2:
-    <<: *cli-proxy-api
-    volumes:
-      - cli_proxy_api_2_config_data:/CLIProxyAPI/config
-      - cli_proxy_api_2_auth_data:/CLIProxyAPI/auth
-    configs:
-      - source: cli_proxy_api_2_config_yaml
-        target: /CLIProxyAPI/config_ro/config.yaml
-    deploy:
-      <<: *common-deploy
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.cli-proxy-api-2.rule=Host(`${CLI_PROXY_API_2_HOST}`)
-        - traefik.http.routers.cli-proxy-api-2.entrypoints=websecure
-        - traefik.http.routers.cli-proxy-api-2.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
-        - traefik.http.services.cli-proxy-api-2.loadbalancer.server.port=8317
-
-  db:
-    image: postgres:18.1-alpine3.23
-    environment:
-      POSTGRES_USER: ${DB_USER:-app}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-app_db_PW@2018}
-      POSTGRES_DB: ${DB_NAME:-app}
-    volumes:
-      - db_data:/var/lib/postgresql/data
-    networks:
-      - internal
-    healthcheck:
-      <<: *common-healthcheck
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${DB_USER:-app} -d ${DB_NAME:-app} -p 5432",
-        ]
+        - traefik.http.routers.antigravity-manager.rule=Host(`${ANTIGRAVITY_MANAGER_HOST}`)
+        - traefik.http.routers.antigravity-manager.entrypoints=websecure
+        - traefik.http.routers.antigravity-manager.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
+        - traefik.http.services.antigravity-manager.loadbalancer.server.port=8045
+        - traefik.http.routers.antigravity-manager.service=antigravity-manager
 
   litellm:
-    image: ghcr.io/berriai/litellm-database:main-1.80.15-stable.1
-    deploy:
-      <<: *common-deploy
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.litellm.rule=Host(`${LITELLM_HOST}`)
-        - traefik.http.routers.litellm.entrypoints=websecure
-        - traefik.http.routers.litellm.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
-        - traefik.http.services.litellm.loadbalancer.server.port=4000
+    image: ghcr.io/berriai/litellm-database:main-v1.81.3.rc.2
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
@@ -128,7 +69,7 @@ services:
       SEPARATE_HEALTH_PORT: "4001"
       LITELLM_DROP_PARAMS: "True"
     configs:
-      - source: litellm_config_yaml
+      - source: litellm-config-yaml
         target: /app/config.yaml
     healthcheck: # Defines the health check configuration for the container
       <<: *common-healthcheck
@@ -139,22 +80,60 @@ services:
     networks:
       - internal
       - public
+      - monitoring
+    deploy:
+      <<: *common-deploy
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.litellm.rule=Host(`${LITELLM_HOST}`)
+        - traefik.http.routers.litellm.entrypoints=websecure
+        - traefik.http.routers.litellm.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
+        - traefik.http.services.litellm.loadbalancer.server.port=4000
+        - traefik.http.routers.litellm.service=litellm
+
+  # Database cleanup job - prunes old spend logs to prevent disk exhaustion
+  db-cleanup:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: db
+      PGUSER: ${DB_USER:-app}
+      PGPASSWORD: ${DB_PASSWORD:-app_db_PW@2018}
+      PGDATABASE: ${DB_NAME:-app}
+      RETENTION_DAYS: ${DB_CLEANUP_RETENTION_DAYS:-365}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Starting database cleanup job..."
+        echo "Deleting spend logs older than $${RETENTION_DAYS} days..."
+        psql -c "DELETE FROM \"LiteLLM_SpendLogs\" WHERE \"startTime\" < NOW() - INTERVAL '$${RETENTION_DAYS} days';"
+        echo "Running VACUUM ANALYZE..."
+        psql -c "VACUUM ANALYZE \"LiteLLM_SpendLogs\";"
+        echo "Cleanup completed at $$(date)"
+    networks:
+      - internal
+    deploy:
+      mode: replicated
+      replicas: 0
+      labels:
+        - swarm.cronjob.enable=true
+        - swarm.cronjob.schedule=0 3 * * 0
+        - swarm.cronjob.skip-running=true
+      restart_policy:
+        condition: none
 
 configs:
-  cli_proxy_api_config_yaml:
-    name: ${CLI_PROXY_API_CONFIG_NAME:-llmproxy_cli_proxy_api_config_yaml}
-    external: true
-  cli_proxy_api_2_config_yaml:
-    name: ${CLI_PROXY_API_2_CONFIG_NAME:-llmproxy_cli_proxy_api_2_config_yaml}
-    external: true
-  litellm_config_yaml:
-    name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm_config_yaml}
+  litellm-config-yaml:
+    name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm-config-yaml}
     external: true
 
 networks:
   internal:
-    driver: overlay
-    internal: true
+    name: ${PUBLIC_NETWORK:-llmproxy}
+    external: true
   public:
     name: ${PUBLIC_NETWORK:-public}
+    external: true
+  monitoring:
+    name: ${MONITORING_NETWORK:-monitoring}
     external: true

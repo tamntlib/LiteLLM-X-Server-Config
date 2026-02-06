@@ -1,0 +1,55 @@
+# Environment variables: follow .env.example file
+
+x-common-healthcheck: &common-healthcheck
+  interval: 30s # Perform health check every 30 seconds
+  timeout: 10s # Health check command times out after 10 seconds
+  retries: 3 # Retry up to 3 times if health check fails
+
+x-common-deploy: &common-deploy
+  replicas: 1
+  update_config:
+    parallelism: 1
+    delay: 10s
+    order: stop-first
+    failure_action: rollback
+  rollback_config:
+    parallelism: 1
+    delay: 10s
+    order: stop-first
+
+services:
+  db:
+    image: postgres:18.1-alpine3.23
+    environment:
+      POSTGRES_USER: ${DB_USER:-app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-app_db_PW@2018}
+      POSTGRES_DB: ${DB_NAME:-app}
+    volumes:
+      - db-data:/var/lib/postgresql
+    networks:
+      - internal
+      - monitoring
+    healthcheck:
+      <<: *common-healthcheck
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-app} -d ${DB_NAME:-app} -p 5432",
+        ]
+    deploy:
+      <<: *common-deploy
+      labels:
+        # Auto-discovery labels for Netdata monitoring (service labels)
+        - netdata.postgres.name=litellm_db
+        - netdata.postgres.dsn=postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}
+
+volumes:
+  db-data:
+
+networks:
+  internal:
+    name: ${INTERNAL_NETWORK:-llmproxy}
+    internal: true
+  monitoring:
+    name: ${MONITORING_NETWORK:-monitoring}
+    external: true

@@ -48,7 +48,7 @@ services:
       - public
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "traefik_letsencrypt_data:/letsencrypt"
+      - "traefik-letsencrypt-data:/letsencrypt"
     deploy:
       placement:
         constraints:
@@ -62,7 +62,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/docker/volumes:/var/lib/docker/volumes
     networks:
-      - agent_network
+      - agent-network
     deploy:
       mode: global
       placement:
@@ -73,10 +73,10 @@ services:
     image: portainer/portainer-ce:lts
     command: -H tcp://tasks.agent:9001 --tlsskipverify
     volumes:
-      - portainer_data:/data
+      - portainer-data:/data
     networks:
       - public
-      - agent_network
+      - agent-network
     deploy:
       mode: replicated
       replicas: 1
@@ -105,9 +105,9 @@ networks:
     name: public
     driver: overlay
     attachable: true
-  agent_network:
+  agent-network:
     driver: overlay
 
 volumes:
-  portainer_data:
-  traefik_letsencrypt_data:
+  portainer-data:
+  traefik-letsencrypt-data:

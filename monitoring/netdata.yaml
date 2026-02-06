@@ -1,0 +1,99 @@
+# Netdata Monitoring Stack for LLM Proxy
+# Deploy: ptctools docker stack deploy -u $PORTAINER_URL -n monitoring -f 'netdata.yaml'
+
+volumes:
+  netdata-config:
+  netdata-lib:
+  netdata-cache:
+
+x-common-healthcheck: &common-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+services:
+  netdata:
+    image: netdata/netdata:stable
+    hostname: "{{.Node.Hostname}}"
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - NETDATA_EXTRA_DEB_PACKAGES=
+    volumes:
+      # Netdata persistent storage
+      - netdata-config:/etc/netdata
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      # Host system monitoring (read-only)
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/log:/host/var/log:ro
+      # Docker container monitoring (read-only)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    configs:
+      - source: netdata-conf
+        target: /etc/netdata/netdata.conf
+    networks:
+      monitoring:
+      public:
+        aliases:
+          - netdata
+    healthcheck:
+      <<: *common-healthcheck
+      test:
+        - CMD-SHELL
+        - curl -sf http://localhost:19999/api/v1/info > /dev/null || exit 1
+      start_period: 30s
+    deploy:
+      mode: global
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.netdata.rule=Host(`${NETDATA_HOST}`)
+        - traefik.http.routers.netdata.entrypoints=websecure
+        - traefik.http.routers.netdata.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
+        - traefik.http.services.netdata.loadbalancer.server.port=19999
+        - traefik.http.routers.netdata.service=netdata
+        # Basic auth middleware (required)
+        - traefik.http.routers.netdata.middlewares=netdata-auth
+        - traefik.http.middlewares.netdata-auth.basicauth.users=${NETDATA_BASIC_AUTH}
+
+  # Sidecar that watches Docker labels and generates Netdata configs
+  config-generator:
+    image: docker:cli
+    command: ["/bin/sh", "/scripts/netdata-config-generator.sh"]
+    environment:
+      - POLL_INTERVAL=${CONFIG_POLL_INTERVAL:-30}
+    volumes:
+      - netdata-config:/etc/netdata
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    configs:
+      - source: config-generator-script
+        target: /scripts/netdata-config-generator.sh
+        mode: 0755
+    networks:
+      - monitoring
+    deploy:
+      mode: global
+
+configs:
+  netdata-conf:
+    name: ${NETDATA_CONF_NAME:-monitoring_netdata-conf}
+    external: true
+  config-generator-script:
+    name: ${CONFIG_GENERATOR_SCRIPT_NAME:-monitoring_config-generator-script}
+    external: true
+
+networks:
+  monitoring:
+    name: ${MONITORING_NETWORK:-monitoring}
+    driver: overlay
+  public:
+    name: ${PUBLIC_NETWORK:-public}
+    external: true

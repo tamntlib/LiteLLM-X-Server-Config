@@ -211,4 +211,8 @@ __marimo__/
 llmproxy-backup
 cli_proxy_api*.yaml
 !cli_proxy_api.example.yaml
-litellm-scripts/litellm_openapi.json
+litellm_scripts/litellm_openapi.json
+litellm_scripts/credentials*.json
+!litellm_scripts/credentials.example.json
+
+.DS_Store
