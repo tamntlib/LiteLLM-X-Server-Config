@@ -68,18 +68,33 @@ ptctools docker db backup -c container_id -v db_data \
 
 - `llmproxy.yaml`: Docker Stack definition with all services and Traefik labels
 - `configs/litellm.yaml`: LiteLLM internal config (batch writes, connection pools, logging)
-- `litellm_scripts/config.json`: Master config defining providers, model groups, aliases, and fallbacks
-- `litellm_scripts/credentials.json`: API keys for each service/provider (gitignored)
+- `litellm_scripts/config.json`: Base config defining providers, model groups, aliases, and fallbacks
+- `litellm_scripts/config.local.json`: Local overrides including API keys (gitignored)
 - `.env`: Environment variables (DB credentials, hostnames, API keys)
 
 ## LiteLLM config.json Structure
 
 The `litellm_scripts/config.json` defines:
-- **providers**: Service definitions with `api_base`, `interfaces` (openai/gemini/anthropic), and `models`
+- **providers**: Service definitions with `api_base`, `interfaces` (openai/gemini/anthropic), `access_groups`, and `models`
 - **aliases**: Model name mappings (e.g., `claude-opus-4-5` -> `anthropic/claude-opus-4-5-20251101`)
 - **fallbacks**: Automatic routing to alternative models on failure
 
-Provider configs support `__extend__` directive to inherit from another provider with overrides.
+Provider configs support `$extend` directive to inherit from another provider with overrides.
+
+Individual models can override the provider-level `access_groups` by specifying `access_groups` in their model config. If not set, the provider-level value is used.
+
+### Local Configuration (config.local.json)
+
+Create `config.local.json` to add API keys and local overrides (deep-merged with `config.json`):
+```json
+{
+  "providers": {
+    "my-provider": {
+      "api_key": "sk-your-api-key-here"
+    }
+  }
+}
+```
 
 ## Monitoring (monitoring/)
 

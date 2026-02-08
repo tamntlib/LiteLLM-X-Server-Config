@@ -1,0 +1,151 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://example.com/litellm-config.schema.json",
+    "title": "LiteLLM Config Schema",
+    "description": "Configuration schema for LiteLLM proxy management script",
+    "type": "object",
+    "properties": {
+        "$schema": {
+            "type": "string",
+            "description": "JSON Schema reference"
+        },
+        "providers": {
+            "type": "object",
+            "description": "Service providers configuration",
+            "additionalProperties": {
+                "$ref": "#/$defs/provider"
+            }
+        },
+        "aliases": {
+            "type": "object",
+            "description": "Model name aliases mapping (alias -> target model)",
+            "additionalProperties": {
+                "type": "string",
+                "description": "Target model name or another alias"
+            }
+        },
+        "fallbacks": {
+            "type": "array",
+            "description": "Fallback rules for automatic routing on failure",
+            "items": {
+                "type": "object",
+                "description": "Fallback rule mapping source model to fallback targets",
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of fallback model names"
+                }
+            }
+        }
+    },
+    "$defs": {
+        "provider": {
+            "type": "object",
+            "description": "Provider configuration",
+            "properties": {
+                "$extend": {
+                    "type": ["string", "null"],
+                    "description": "Inherit configuration from another provider. Set to null to remove inheritance."
+                },
+                "api_key": {
+                    "type": "string",
+                    "description": "API key for authentication (typically in config.local.json)"
+                },
+                "api_base": {
+                    "type": "string",
+                    "description": "Base URL for the API endpoint"
+                },
+                "access_groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Access groups for model visibility"
+                },
+                "interfaces": {
+                    "type": "object",
+                    "description": "Provider interfaces (openai, gemini, anthropic)",
+                    "properties": {
+                        "openai": {
+                            "$ref": "#/$defs/interface"
+                        },
+                        "gemini": {
+                            "$ref": "#/$defs/interface"
+                        },
+                        "anthropic": {
+                            "$ref": "#/$defs/interface"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "models": {
+                    "type": "object",
+                    "description": "Common models available across all interfaces",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/model"
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "interface": {
+            "type": "object",
+            "description": "Interface-specific configuration",
+            "properties": {
+                "models": {
+                    "type": "object",
+                    "description": "Interface-specific models (merged with provider models)",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/model"
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "model": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "description": "Model configuration",
+                    "properties": {
+                        "model_name": {
+                            "type": "string",
+                            "description": "Model group name (defaults to the key if not specified)"
+                        },
+                        "access_groups": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Access groups for this model (overrides provider-level access_groups)"
+                        },
+                        "model_info": {
+                            "type": "object",
+                            "description": "Model metadata",
+                            "properties": {
+                                "base_model": {
+                                    "type": "string",
+                                    "description": "Base model identifier for pricing/capabilities lookup"
+                                }
+                            },
+                            "additionalProperties": true
+                        },
+                        "litellm_params": {
+                            "type": "object",
+                            "description": "Additional LiteLLM parameters",
+                            "additionalProperties": true
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "null",
+                    "description": "Empty model config (use defaults)"
+                }
+            ]
+        }
+    },
+    "additionalProperties": false
+}

@@ -2,9 +2,22 @@
 """
 Unified LiteLLM management script for credentials, models, aliases, and fallbacks.
 
+Configuration:
+    - config.json: Base configuration (providers, models, aliases, fallbacks)
+    - config.local.json: Local overrides (extends/overrides config.json)
+      Include api_key in provider config for credentials:
+      {
+        "providers": {
+          "my-provider": {
+            "api_key": "sk-..."
+          }
+        }
+      }
+
 Usage:
     python3 config.py --only credentials,models,aliases,fallbacks --force --prune
 """
+
 import asyncio
 import urllib.request
 import urllib.error
@@ -16,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from load_dotenv import load_dotenv
+
+from gen_config import generate_config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +44,6 @@ LITELLM_API_KEY = os.environ["LITELLM_API_KEY"]
 LITELLM_BASE_URL = os.environ["LITELLM_BASE_URL"]
 
 DEFAULT_CONFIG_FILE = "config.json"
-DEFAULT_CREDENTIALS_FILE = "credentials.json"
 
 PROVIDER_CONFIG = {
     "openai": {
@@ -50,58 +64,6 @@ PROVIDER_CONFIG = {
 # ============================================================================
 # Utility Functions
 # ============================================================================
-
-
-def load_json(file_path):
-    with open(file_path) as f:
-        return json.load(f)
-
-
-def deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge two dictionaries. Override values take precedence."""
-    result = base.copy()
-    for key, value in override.items():
-        if key == "__extend__":
-            continue  # Skip the extend directive
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def resolve_provider_extensions(providers: dict) -> dict:
-    """Resolve __extend__ directives in provider configs.
-
-    Example:
-        "provider-2": {
-            "__extend__": "provider-1",
-            "access_groups": [],
-            "api_base": "http://different:8045"
-        }
-
-    This will copy all config from provider-1 and override with provider-2's values.
-    """
-    resolved = {}
-
-    # First pass: add providers without __extend__
-    for name, config in providers.items():
-        if "__extend__" not in config:
-            resolved[name] = config.copy()
-
-    # Second pass: resolve providers with __extend__
-    for name, config in providers.items():
-        if "__extend__" in config:
-            base_name = config["__extend__"]
-            if base_name not in resolved:
-                logger.error(
-                    f"Provider '{name}' extends non-existent provider '{base_name}'"
-                )
-                continue
-            base_config = resolved[base_name]
-            resolved[name] = deep_merge(base_config, config)
-
-    return resolved
 
 
 def get_actor_from_key():
@@ -278,51 +240,35 @@ def delete_model_by_id(model_id):
     return post_request("model/delete", {"id": model_id})
 
 
-def create_model(
-    litellm_model_name,
-    service_name,
-    provider,
-    force=False,
-    actor=None,
-    base_model=None,
-    access_groups=None,
-    model_group_name=None,
-    existing_models=None,
-    litellm_params_cfg=None,
-    model_info_cfg=None,
-):
-    """Create a model.
+def _create_model(payload, force, actor, existing_models_cache):
+    """Create or replace a single model from a pre-built payload.
 
     Args:
-        litellm_model_name: The model name for litellm_params.model (e.g., "gemini-3-flash")
-        model_group_name: Optional model group name (e.g., "gemini-3-flash-preview"), defaults to litellm_model_name
-        existing_models: Dict of (model_name, credential_name) -> model_id for cached lookup
-        litellm_params_cfg: Additional litellm_params from config
-        model_info_cfg: Additional model_info from config
-    """
-    # Use model_group_name if provided, otherwise use litellm_model_name
-    group_name = model_group_name if model_group_name else litellm_model_name
-    full_model_name = f"{provider}/{group_name}"
+        payload: Dict with model_name, litellm_params, model_info (from gen_config)
+        force: Whether to replace existing models
+        actor: Actor identifier for audit fields
+        existing_models_cache: Dict of (model_name, credential_name) -> [model_ids]
 
-    credential_name = f"{service_name}-{provider}"
+    Returns:
+        (success, action, duplicates_deleted)
+    """
+    full_model_name = payload["model_name"]
+    credential_name = payload["litellm_params"]["litellm_credential_name"]
 
     # Check if model exists using cached models (could have multiple duplicates)
     model_key = (full_model_name, credential_name)
-    model_ids = existing_models.get(model_key, []) if existing_models else []
+    model_ids = existing_models_cache.get(model_key, [])
     duplicates_deleted = 0
 
     if model_ids:
         if force:
-            # Delete ALL matching models (handles duplicates)
             for model_id in model_ids:
                 delete_model_by_id(model_id)
-            duplicates_deleted = (
-                len(model_ids) - 1
-            )  # Extra deletions beyond the one we're replacing
+            duplicates_deleted = len(model_ids) - 1
             action = "replaced"
         else:
             logger.info(f"Skipped model: {full_model_name} ({credential_name})")
-            return True, "skipped", None, 0
+            return True, None, 0
     else:
         action = "created"
 
@@ -332,92 +278,45 @@ def create_model(
         .replace("+00:00", "Z")
     )
 
-    # Build model_info from config and add required fields
-    model_info = dict(model_info_cfg) if model_info_cfg else {}
-    model_info.update({
-        "updated_at": now_iso_string,
-        "updated_by": actor,
-        "created_at": now_iso_string,
-        "created_by": actor,
-    })
-
-    if base_model:
-        model_info["base_model"] = base_model
-
-    if access_groups:
-        model_info["access_groups"] = access_groups
-
-    # Build litellm_params from config and add required fields
-    litellm_params = dict(litellm_params_cfg) if litellm_params_cfg else {}
-    litellm_params.update({
-        "model": f"{provider}/{litellm_model_name}",
-        "litellm_credential_name": credential_name,
-    })
-
-    success, result = post_request(
-        "model/new",
+    # Add audit fields to model_info
+    model_info = dict(payload.get("model_info", {}))
+    model_info.update(
         {
-            "model_name": full_model_name,
-            "litellm_params": litellm_params,
-            "model_info": model_info,
-        },
+            "updated_at": now_iso_string,
+            "updated_by": actor,
+            "created_at": now_iso_string,
+            "created_by": actor,
+        }
     )
-    return success, result, action, duplicates_deleted
 
+    request_body = {
+        "model_name": full_model_name,
+        "litellm_params": payload["litellm_params"],
+        "model_info": model_info,
+    }
 
-async def create_model_async(
-    executor,
-    litellm_model_name,
-    service_name,
-    provider,
-    force=False,
-    actor=None,
-    base_model=None,
-    access_groups=None,
-    model_group_name=None,
-    existing_models=None,
-    litellm_params_cfg=None,
-    model_info_cfg=None,
-):
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        executor,
-        lambda: create_model(
-            litellm_model_name,
-            service_name,
-            provider,
-            force,
-            actor,
-            base_model,
-            access_groups,
-            model_group_name,
-            existing_models,
-            litellm_params_cfg,
-            model_info_cfg,
-        ),
-    )
-    group_name = model_group_name if model_group_name else litellm_model_name
-    full_model_name = f"{provider}/{group_name}"
-    credential_name = f"{service_name}-{provider}"
-    if len(result) == 4:
-        success, msg, action, duplicates_deleted = result
-    elif len(result) == 3:
-        success, msg, action = result
-        duplicates_deleted = 0
-    else:
-        success, msg = result
-        action = None
-        duplicates_deleted = 0
+    success, result = post_request("model/new", request_body)
+
     if success:
         if action == "replaced":
             logger.info(f"Replaced model: {full_model_name} ({credential_name})")
-        elif action == "created":
+        else:
             logger.info(f"Created model: {full_model_name} ({credential_name})")
     else:
         logger.error(
-            f"Failed to create model: {full_model_name} ({credential_name}) - {msg}"
+            f"Failed to create model: {full_model_name} ({credential_name}) - {result}"
         )
+
     return success, action, duplicates_deleted
+
+
+async def _sync_single_model(executor, payload, force, actor, existing_models_cache):
+    """Async wrapper for _create_model."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        executor,
+        lambda: _create_model(payload, force, actor, existing_models_cache),
+    )
 
 
 # ============================================================================
@@ -539,41 +438,33 @@ def update_fallbacks(fallbacks: list, force=False):
 # ============================================================================
 
 
-async def sync_credentials(
-    config: dict, credentials_config: dict, force=False, prune=False
-):
+async def sync_credentials(config: dict, force=False, prune=False):
     logger.info("=" * 60)
     logger.info("Syncing credentials...")
     logger.info("=" * 60)
 
     expected_credentials = set()
-    providers = resolve_provider_extensions(config.get("providers", {}))
+    credentials = config.get("credentials", [])
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         tasks = []
 
-        for service_name, provider_config in providers.items():
-            api_base = provider_config.get("api_base", "")
-            interfaces = provider_config.get("interfaces", {})
+        for cred in credentials:
+            service_name = cred["service_name"]
+            provider = cred["provider"]
+            api_key = cred["api_key"]
+            api_base = cred["api_base"]
 
-            creds = credentials_config.get(service_name, {})
-            api_key = creds.get("api_key")
-
-            if not api_key:
-                logger.warning(f"No API key found for {service_name}, skipping")
+            if provider not in PROVIDER_CONFIG:
+                logger.warning(f"Unknown provider: {provider}, skipping")
                 continue
 
-            for provider in interfaces.keys():
-                if provider not in PROVIDER_CONFIG:
-                    logger.warning(f"Unknown provider: {provider}, skipping")
-                    continue
-
-                expected_credentials.add(f"{service_name}-{provider}")
-                tasks.append(
-                    create_credential_async(
-                        executor, service_name, provider, api_key, api_base, force
-                    )
+            expected_credentials.add(f"{service_name}-{provider}")
+            tasks.append(
+                create_credential_async(
+                    executor, service_name, provider, api_key, api_base, force
                 )
+            )
 
         await asyncio.gather(*tasks)
 
@@ -590,7 +481,7 @@ async def sync_credentials(
                     logger.error(f"Failed to delete credential: {cred_name} - {result}")
 
 
-async def sync_models(config: dict, credentials_config: dict, force=False, prune=False):
+async def sync_models(config: dict, force=False, prune=False):
     logger.info("=" * 60)
     logger.info("Syncing models...")
     logger.info("=" * 60)
@@ -599,7 +490,7 @@ async def sync_models(config: dict, credentials_config: dict, force=False, prune
     logger.info(f"Actor: {actor}")
 
     expected_models = set()
-    providers = resolve_provider_extensions(config.get("providers", {}))
+    model_payloads = config.get("models", [])
 
     created_count = 0
     replaced_count = 0
@@ -607,86 +498,48 @@ async def sync_models(config: dict, credentials_config: dict, force=False, prune
     failed_count = 0
 
     # Cache existing models once before processing (store list of IDs to handle duplicates)
-    existing_models = {}
+    existing_models_cache = {}
     all_models = get_all_models()
     for model_name, credential_name, model_id in all_models:
         key = (model_name, credential_name)
-        if key not in existing_models:
-            existing_models[key] = []
-        existing_models[key].append(model_id)
+        if key not in existing_models_cache:
+            existing_models_cache[key] = []
+        existing_models_cache[key].append(model_id)
 
     # Count total unique model groups and warn about duplicates
-    total_models = sum(len(ids) for ids in existing_models.values())
-    duplicates = sum(1 for ids in existing_models.values() if len(ids) > 1)
+    total_models = sum(len(ids) for ids in existing_models_cache.values())
+    duplicates = sum(1 for ids in existing_models_cache.values() if len(ids) > 1)
     if duplicates > 0:
         logger.warning(
             f"Found {duplicates} duplicate model groups (will be cleaned up)"
         )
-    logger.info(f"Found {total_models} existing models ({len(existing_models)} unique)")
+    logger.info(
+        f"Found {total_models} existing models ({len(existing_models_cache)} unique)"
+    )
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        for service_name, provider_config in providers.items():
-            interfaces = provider_config.get("interfaces", {})
-            models = provider_config.get("models", {})
+        tasks = []
 
-            creds = credentials_config.get(service_name, {})
-            api_key = creds.get("api_key")
+        for payload in model_payloads:
+            full_model_name = payload["model_name"]
+            credential_name = payload["litellm_params"]["litellm_credential_name"]
+            expected_models.add((full_model_name, credential_name))
 
-            if not api_key:
-                continue
+            tasks.append(
+                _sync_single_model(
+                    executor, payload, force, actor, existing_models_cache
+                )
+            )
 
-            for provider, interface_config in interfaces.items():
-                if provider not in PROVIDER_CONFIG:
-                    continue
-
-                credential_name = f"{service_name}-{provider}"
-                access_groups = provider_config.get("access_groups")
-                tasks = []
-
-                # Merge models with interface-specific models (interface overrides common)
-                all_models = {**models, **interface_config.get("models", {})}
-                for litellm_model_name, model_cfg in all_models.items():
-                    if isinstance(model_cfg, dict):
-                        # Support new format (model_name, model_info.base_model)
-                        model_group_name = model_cfg.get("model_name")
-                        model_info_cfg = model_cfg.get("model_info", {})
-                        base_model = model_info_cfg.get("base_model")
-                        litellm_params_cfg = model_cfg.get("litellm_params", {})
-                    else:
-                        model_group_name = None
-                        base_model = None
-                        litellm_params_cfg = {}
-                    group_name = model_group_name if model_group_name else litellm_model_name
-                    base_model = base_model or group_name
-                    expected_models.add((f"{provider}/{group_name}", credential_name))
-                    tasks.append(
-                        create_model_async(
-                            executor,
-                            litellm_model_name,
-                            service_name,
-                            provider,
-                            force,
-                            actor,
-                            base_model,
-                            access_groups,
-                            model_group_name,
-                            existing_models,
-                            litellm_params_cfg,
-                            model_info_cfg,
-                        )
-                    )
-
-                results = await asyncio.gather(*tasks)
-                for success, action, duplicates_deleted in results:
-                    if success and action == "created":
-                        created_count += 1
-                    elif success and action == "replaced":
-                        replaced_count += 1
-                        deleted_count += (
-                            duplicates_deleted  # Count extra deletions from duplicates
-                        )
-                    elif not success:
-                        failed_count += 1
+        results = await asyncio.gather(*tasks)
+        for success, action, duplicates_deleted in results:
+            if success and action == "created":
+                created_count += 1
+            elif success and action == "replaced":
+                replaced_count += 1
+                deleted_count += duplicates_deleted
+            elif not success:
+                failed_count += 1
 
     if prune:
         logger.info("Pruning unused models...")
@@ -768,12 +621,7 @@ async def main():
         default=DEFAULT_CONFIG_FILE,
         help="Path to the config file (default: config.json in script dir)",
     )
-    parser.add_argument(
-        "--credentials",
-        type=Path,
-        default=DEFAULT_CREDENTIALS_FILE,
-        help="Path to the credentials file (default: credentials.json in script dir)",
-    )
+
     args = parser.parse_args()
 
     components = [c.strip() for c in args.only.split(",")]
@@ -791,29 +639,20 @@ async def main():
         return
 
     config_file = args.config
-    credentials_file = args.credentials
 
     logger.info(f"Using config file: {config_file}")
-    logger.info(f"Using credentials file: {credentials_file}")
 
     if not config_file.exists():
         logger.error(f"Config file not found: {config_file}")
         return
 
-    config = load_json(config_file)
-
-    # Try to load credentials, fall back to empty if not accessible
-    try:
-        credentials_config = load_json(credentials_file)
-    except FileNotFoundError:
-        logger.warning(f"Credentials file not found: {credentials_file}")
-        credentials_config = {}
+    config = generate_config(config_file)
 
     if "credentials" in components:
-        await sync_credentials(config, credentials_config, args.force, args.prune)
+        await sync_credentials(config, args.force, args.prune)
 
     if "models" in components:
-        await sync_models(config, credentials_config, args.force, args.prune)
+        await sync_models(config, args.force, args.prune)
 
     if "aliases" in components:
         sync_aliases(config, args.force)

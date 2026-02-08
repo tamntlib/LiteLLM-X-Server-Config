@@ -128,9 +128,50 @@ Requires environment variables in `litellm_scripts/.env`: `LITELLM_API_KEY`, `LI
 |------|-------------|
 | `llmproxy.yaml` | Docker Stack definition with all services and Traefik labels |
 | `configs/litellm.yaml` | LiteLLM internal config (batch writes, connection pools, logging) |
-| `litellm_scripts/config.json` | Master config defining providers, model groups, aliases, and fallbacks |
-| `litellm_scripts/credentials.json` | API keys for each service/provider (gitignored) |
+| `litellm_scripts/config.json` | Base config defining providers, model groups, aliases, and fallbacks |
+| `litellm_scripts/config.local.json` | Local overrides including API keys (gitignored, deep-merged with config.json) |
 | `.env` | Environment variables (DB credentials, hostnames, API keys) |
+
+### Local Configuration (config.local.json)
+
+Create `litellm_scripts/config.local.json` to add API keys and local overrides:
+```json
+{
+  "providers": {
+    "my-provider": {
+      "api_key": "sk-your-api-key-here"
+    },
+    "another-provider": {
+      "api_key": "sk-another-key"
+    }
+  }
+}
+```
+
+This file is deep-merged with `config.json`, so you only need to specify overrides (like API keys).
+
+### Model-level access_groups
+
+Individual models can override the provider-level `access_groups` by specifying `access_groups` in their model config:
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "access_groups": ["General"],
+      "models": {
+        "model-a": null,
+        "model-b": {
+          "access_groups": ["Premium"]
+        }
+      }
+    }
+  }
+}
+```
+
+- `model-a` inherits the provider-level `access_groups`: `["General"]`
+- `model-b` uses its own `access_groups`: `["Premium"]`
 
 ## Backup and Restore
 
