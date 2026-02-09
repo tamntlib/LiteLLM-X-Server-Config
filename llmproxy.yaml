@@ -20,7 +20,7 @@ x-common-deploy: &common-deploy
     order: stop-first
 
 x-antigravity-manager: &antigravity-manager
-  image: lbjlaq/antigravity-manager:v4.1.10
+  image: lbjlaq/antigravity-manager:v4.1.11
   environment:
     - API_KEY=${ANTIGRAVITY_MANAGER_API_KEY}
     - WEB_PASSWORD=${ANTIGRAVITY_MANAGER_WEB_PASSWORD}
