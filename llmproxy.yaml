@@ -1,7 +1,6 @@
 # Environment variables: follow .env.example file
 volumes:
   antigravity-manager-data:
-  antigravity-manager-2-data:
 
 x-common-healthcheck: &common-healthcheck
   interval: 30s # Perform health check every 30 seconds
@@ -53,20 +52,6 @@ services:
         - traefik.http.routers.antigravity-manager.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
         - traefik.http.services.antigravity-manager.loadbalancer.server.port=8045
         - traefik.http.routers.antigravity-manager.service=antigravity-manager
-
-  antigravity-manager-2:
-    <<: *antigravity-manager
-    volumes:
-      - antigravity-manager-2-data:/root/.antigravity_tools
-    deploy:
-      <<: *common-deploy
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.antigravity-manager-2.rule=Host(`${ANTIGRAVITY_MANAGER_2_HOST}`)
-        - traefik.http.routers.antigravity-manager-2.entrypoints=websecure
-        - traefik.http.routers.antigravity-manager-2.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
-        - traefik.http.services.antigravity-manager-2.loadbalancer.server.port=8045
-        - traefik.http.routers.antigravity-manager-2.service=antigravity-manager-2
 
   litellm:
     image: ghcr.io/berriai/litellm-database:main-v1.81.3.rc.2

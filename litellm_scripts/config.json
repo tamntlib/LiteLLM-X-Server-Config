@@ -50,22 +50,15 @@
                 "claude-sonnet-4-5-thinking": {
                     "model_name": "claude-sonnet-4-5"
                 },
-                "claude-opus-4-5-thinking": {
-                    "model_name": "claude-opus-4-5"
-                },
                 "claude-opus-4-6-thinking": {
                     "model_name": "claude-opus-4-6"
                 }
             }
-        },
-        "antigravity-manager-2": {
-            "$extend": "antigravity-manager",
-            "api_base": "http://antigravity-manager-2:8045"
         }
     },
     "aliases": {
         "claude-opus-4-6": "anthropic/claude-opus-4-6",
-        "claude-opus-4-5": "anthropic/claude-opus-4-5",
+        "claude-opus-4-5": "anthropic/claude-opus-4-6",
         "claude-sonnet-4-5": "anthropic/claude-sonnet-4-5",
         "claude-haiku-4-5": "anthropic/claude-sonnet-4-5-standard",
         "claude-opus-4-5-20251101": "claude-opus-4-5",
@@ -77,7 +70,6 @@
     "fallbacks": [
         {
             "claude-opus-4-6": [
-                "anthropic/claude-opus-4-5",
                 "anthropic/gemini-3-pro-preview"
             ]
         },
