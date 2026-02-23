@@ -95,7 +95,7 @@ services:
         - traefik.http.routers.antigravity-manager.service=antigravity-manager
 
   litellm:
-    image: ghcr.io/berriai/litellm-database:main-v1.81.12-stable
+    image: tamntlib/litellm-database:main-v1.81.12-stable-1
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
@@ -109,6 +109,7 @@ services:
       SEPARATE_HEALTH_APP: "1"
       SEPARATE_HEALTH_PORT: "4001"
       LITELLM_DROP_PARAMS: "True"
+      EXA_API_KEY: ${EXA_API_KEY}
     configs:
       - source: litellm-config-yaml
         target: /app/config.yaml

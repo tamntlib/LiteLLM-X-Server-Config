@@ -2,3 +2,16 @@ general_settings:
   proxy_batch_write_at: 60 # Batch write spend updates every 60s
   database_connection_pool_limit: 10 # connection pool limit per worker process. Total connections = limit × workers × instances. Calculate: MAX_DB_CONNECTIONS / (instances × workers). Default: 10.
   store_prompts_in_spend_logs: true
+
+litellm_settings:
+  callbacks:
+    - websearch_interception
+  websearch_interception_params:
+    enabled_providers:
+      - anthropic
+
+search_tools:
+  - search_tool_name: exa-search
+    litellm_params:
+      search_provider: exa_ai
+      api_key: os.environ/EXA_API_KEY
