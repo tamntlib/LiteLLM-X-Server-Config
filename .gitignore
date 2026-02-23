@@ -209,8 +209,8 @@ __marimo__/
 .env*
 !.env.example
 llmproxy-backup
-cli_proxy_api*.yaml
-!cli_proxy_api.example.yaml
+configs/cli-proxy-api.yaml
+!configs/cli-proxy-api.example.yaml
 litellm_scripts/litellm_openapi.json
 litellm_scripts/config.local.json
 litellm_scripts/config.gen.json

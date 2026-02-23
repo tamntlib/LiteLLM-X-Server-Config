@@ -1,5 +1,7 @@
 # Environment variables: follow .env.example file
 volumes:
+  cli-proxy-api-auth-data:
+  cli-proxy-api-config-data:
   antigravity-manager-data:
 
 x-common-healthcheck: &common-healthcheck
@@ -19,8 +21,29 @@ x-common-deploy: &common-deploy
     delay: 10s
     order: stop-first
 
+x-cli-proxy-api: &cli-proxy-api
+  image: eceasy/cli-proxy-api:v6.8.26
+  command:
+    - sh
+    - -c
+    - |
+      if [ ! -f /CLIProxyAPI/config/config.yaml ]; then
+        cp /CLIProxyAPI/config_ro/config.yaml /CLIProxyAPI/config/config.yaml
+      fi
+      exec ./CLIProxyAPI --config /CLIProxyAPI/config/config.yaml
+  environment:
+    TZ: ${TZ:-UTC}
+  healthcheck:
+    <<: *common-healthcheck
+    test: ["CMD-SHELL", "wget -q --spider http://localhost:8317/ || exit 1"]
+    start_period: 10s
+  networks:
+    - internal
+    - public
+    - monitoring
+
 x-antigravity-manager: &antigravity-manager
-  image: lbjlaq/antigravity-manager:v4.1.11
+  image: lbjlaq/antigravity-manager:v4.1.22
   environment:
     - API_KEY=${ANTIGRAVITY_MANAGER_API_KEY}
     - WEB_PASSWORD=${ANTIGRAVITY_MANAGER_WEB_PASSWORD}
@@ -39,6 +62,24 @@ x-antigravity-manager: &antigravity-manager
     start_period: 30s
 
 services:
+  cli-proxy-api:
+    <<: *cli-proxy-api
+    volumes:
+      - cli-proxy-api-config-data:/CLIProxyAPI/config
+      - cli-proxy-api-auth-data:/CLIProxyAPI/auth
+    configs:
+      - source: cli-proxy-api-config-yaml
+        target: /CLIProxyAPI/config_ro/config.yaml
+    deploy:
+      <<: *common-deploy
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.cli-proxy-api.rule=Host(`${CLI_PROXY_API_HOST}`)
+        - traefik.http.routers.cli-proxy-api.entrypoints=websecure
+        - traefik.http.routers.cli-proxy-api.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
+        - traefik.http.services.cli-proxy-api.loadbalancer.server.port=8317
+        - traefik.http.routers.cli-proxy-api.service=cli-proxy-api
+
   antigravity-manager:
     <<: *antigravity-manager
     volumes:
@@ -54,7 +95,7 @@ services:
         - traefik.http.routers.antigravity-manager.service=antigravity-manager
 
   litellm:
-    image: ghcr.io/berriai/litellm-database:main-v1.81.3.rc.2
+    image: ghcr.io/berriai/litellm-database:main-v1.81.12-stable
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
@@ -123,6 +164,9 @@ services:
         condition: none
 
 configs:
+  cli-proxy-api-config-yaml:
+    name: ${CLI_PROXY_API_CONFIG_NAME:-llmproxy_cli-proxy-api-config-yaml}
+    external: true
   litellm-config-yaml:
     name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm-config-yaml}
     external: true

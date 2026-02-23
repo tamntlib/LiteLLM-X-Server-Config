@@ -75,7 +75,8 @@ LETSENCRYPT_EMAIL=<email> PORTAINER_HOST=<host> docker stack deploy -c /root/por
 Add the following records to your DNS:
 
 - llm.example.com (for LiteLLM)
-- antigravity.example.com (for Antigravity Manager)
+- cli-proxy-api.llm.example.com (for CLIProxyAPI)
+- antigravity-manager.llm.example.com (for Antigravity Manager)
 
 #### Set environment variables
 
@@ -98,6 +99,7 @@ export PORTAINER_ACCESS_TOKEN=<token>
 
 # Set config
 ptctools docker config set -n llmproxy_litellm-config-yaml -f 'configs/litellm.yaml'
+ptctools docker config set -n llmproxy_cli-proxy-api-config-yaml -f 'configs/cli-proxy-api.yaml'
 
 # Deploy stacks
 ptctools docker stack deploy -n llmproxy-data -f 'llmproxy-data.yaml' --ownership team

@@ -47,13 +47,16 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config_with_local(config_path: Path) -> dict:
+def load_config_with_local(config_path: Path) -> tuple[dict, dict]:
     """Load config.json and merge with config.local.json if it exists.
 
     The local config file is expected to be in the same directory as the main config.
     Values in local config will override/extend values in the base config.
+
+    Returns a tuple of (merged_config, base_config) so that $base refs can be resolved.
     """
     config = load_json(config_path)
+    base_config = config
 
     # Determine the local config path (same directory, with .local suffix)
     local_config_path = config_path.parent / config_path.name.replace(
@@ -66,7 +69,44 @@ def load_config_with_local(config_path: Path) -> dict:
         config = deep_merge(config, local_config)
         logger.info("Merged local config with base config")
 
-    return config
+    return config, base_config
+
+
+def resolve_fallback_base_refs(fallbacks: list, base_fallbacks: list) -> list:
+    """Resolve $base references in fallback lists.
+
+    In local config, a fallback entry can use "$base" to reference the base
+    config's fallback values for the same model key:
+
+        {"claude-opus-4-6": ["$base", "anthropic/glm-4.7"]}
+
+    If the base config has:
+        {"claude-opus-4-6": ["anthropic/gemini-3.1-pro-preview"]}
+
+    The result will be:
+        {"claude-opus-4-6": ["anthropic/gemini-3.1-pro-preview", "anthropic/glm-4.7"]}
+    """
+    # Build a lookup from base fallbacks: model_key -> fallback list
+    base_lookup = {}
+    for entry in base_fallbacks:
+        for key, values in entry.items():
+            base_lookup[key] = values
+
+    resolved = []
+    for entry in fallbacks:
+        resolved_entry = {}
+        for key, values in entry.items():
+            if "$base" in values:
+                base_values = base_lookup.get(key, [])
+                resolved_entry[key] = [
+                    item
+                    for v in values
+                    for item in (base_values if v == "$base" else [v])
+                ]
+            else:
+                resolved_entry[key] = values
+        resolved.append(resolved_entry)
+    return resolved
 
 
 def resolve_provider_extensions(providers: dict) -> dict:
@@ -109,7 +149,7 @@ def resolve_provider_models(providers: dict) -> list:
     """Resolve providers into a flat list of LiteLLM model request bodies.
 
     For each provider, for each interface, for each model:
-    1. Merge provider-level `models` with interface-specific `models`
+    1. Use interface-specific `models` from providers.<provider>.interfaces.<interface>.models
     2. Resolve access_groups (model-level overrides provider-level)
     3. Build the full model_name, litellm_params, and model_info
 
@@ -118,7 +158,6 @@ def resolve_provider_models(providers: dict) -> list:
     models = []
 
     for service_name, provider_config in providers.items():
-        common_models = provider_config.get("models", {})
         provider_access_groups = provider_config.get("access_groups")
         api_key = provider_config.get("api_key")
 
@@ -131,12 +170,9 @@ def resolve_provider_models(providers: dict) -> list:
             iface = iface_config if iface_config else {}
             iface_models = iface.get("models", {})
 
-            # Merge: common models as base, interface-specific override
-            merged_models = {**common_models, **iface_models}
-
             credential_name = f"{service_name}-{provider}"
 
-            for litellm_model_name, model_cfg in merged_models.items():
+            for litellm_model_name, model_cfg in iface_models.items():
                 if isinstance(model_cfg, dict):
                     model_group_name = model_cfg.get("model_name")
                     model_info_cfg = model_cfg.get("model_info", {})
@@ -150,11 +186,8 @@ def resolve_provider_models(providers: dict) -> list:
                     litellm_params_cfg = {}
                     access_groups = None
 
-                group_name = (
-                    model_group_name if model_group_name else litellm_model_name
-                )
-                full_model_name = f"{provider}/{group_name}"
-                base_model = base_model or group_name
+                model_name = model_group_name or litellm_model_name
+                base_model = base_model or model_name
 
                 # Resolve access_groups: model-level > provider-level
                 resolved_access_groups = (
@@ -181,7 +214,7 @@ def resolve_provider_models(providers: dict) -> list:
 
                 models.append(
                     {
-                        "model_name": full_model_name,
+                        "model_name": model_name,
                         "litellm_params": litellm_params,
                         "model_info": model_info,
                     }
@@ -204,7 +237,7 @@ def generate_config(config_path: Path) -> dict:
     - aliases: model alias mappings
     - fallbacks: fallback rules
     """
-    config = load_config_with_local(config_path)
+    config, base_config = load_config_with_local(config_path)
 
     providers = resolve_provider_extensions(config.get("providers", {}))
 
@@ -228,11 +261,17 @@ def generate_config(config_path: Path) -> dict:
     # Build flat models array
     models = resolve_provider_models(providers)
 
+    # Resolve $base references in fallbacks
+    fallbacks = resolve_fallback_base_refs(
+        config.get("fallbacks", []),
+        base_config.get("fallbacks", []),
+    )
+
     return {
         "credentials": credentials,
         "models": models,
         "aliases": config.get("aliases", {}),
-        "fallbacks": config.get("fallbacks", []),
+        "fallbacks": fallbacks,
     }
 
 

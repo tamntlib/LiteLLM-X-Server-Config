@@ -33,9 +33,10 @@
                 "additionalProperties": {
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Fallback model name, or '$base' to expand base config fallbacks for this key"
                     },
-                    "description": "List of fallback model names"
+                    "description": "List of fallback model names. Use '$base' to reference base config fallbacks."
                 }
             }
         }
@@ -79,13 +80,6 @@
                         }
                     },
                     "additionalProperties": false
-                },
-                "models": {
-                    "type": "object",
-                    "description": "Common models available across all interfaces",
-                    "additionalProperties": {
-                        "$ref": "#/$defs/model"
-                    }
                 }
             },
             "additionalProperties": false
@@ -96,7 +90,7 @@
             "properties": {
                 "models": {
                     "type": "object",
-                    "description": "Interface-specific models (merged with provider models)",
+                    "description": "Models available through this interface",
                     "additionalProperties": {
                         "$ref": "#/$defs/model"
                     }
