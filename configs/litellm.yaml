@@ -9,9 +9,3 @@ litellm_settings:
   websearch_interception_params:
     enabled_providers:
       - anthropic
-
-search_tools:
-  - search_tool_name: exa-search
-    litellm_params:
-      search_provider: exa_ai
-      api_key: os.environ/EXA_API_KEY

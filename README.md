@@ -98,8 +98,8 @@ export PORTAINER_URL=https://portainer.example.com
 export PORTAINER_ACCESS_TOKEN=<token>
 
 # Set config
-ptctools docker config set -n llmproxy_litellm-config-yaml -f 'configs/litellm.yaml'
-ptctools docker config set -n llmproxy_cli-proxy-api-config-yaml -f 'configs/cli-proxy-api.yaml'
+ptctools docker config set -n llmproxy_litellm-config-yaml -f 'configs/litellm.yaml' --ownership team
+ptctools docker config set -n llmproxy_cli-proxy-api-config-yaml -f 'configs/cli-proxy-api.yaml' --ownership team
 
 # Deploy stacks
 ptctools docker stack deploy -n llmproxy-data -f 'llmproxy-data.yaml' --ownership team

@@ -22,7 +22,7 @@ x-common-deploy: &common-deploy
     order: stop-first
 
 x-cli-proxy-api: &cli-proxy-api
-  image: eceasy/cli-proxy-api:v6.8.26
+  image: eceasy/cli-proxy-api:latest
   command:
     - sh
     - -c
@@ -43,7 +43,7 @@ x-cli-proxy-api: &cli-proxy-api
     - monitoring
 
 x-antigravity-manager: &antigravity-manager
-  image: lbjlaq/antigravity-manager:v4.1.22
+  image: lbjlaq/antigravity-manager:latest
   environment:
     - API_KEY=${ANTIGRAVITY_MANAGER_API_KEY}
     - WEB_PASSWORD=${ANTIGRAVITY_MANAGER_WEB_PASSWORD}
@@ -95,7 +95,7 @@ services:
         - traefik.http.routers.antigravity-manager.service=antigravity-manager
 
   litellm:
-    image: tamntlib/litellm-database:main-v1.81.12-stable-1
+    image: tamntlib/litellm-database:v1.81.16.custm-auth.dev
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
@@ -109,7 +109,6 @@ services:
       SEPARATE_HEALTH_APP: "1"
       SEPARATE_HEALTH_PORT: "4001"
       LITELLM_DROP_PARAMS: "True"
-      EXA_API_KEY: ${EXA_API_KEY}
     configs:
       - source: litellm-config-yaml
         target: /app/config.yaml
@@ -118,7 +117,7 @@ services:
       test:
         - CMD-SHELL
         - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4001/health/liveliness')" # Command to execute for health check
-      start_period: 40s # Wait 40 seconds after container start before beginning health checks
+      start_period: 60s # Wait 60 seconds after container start before beginning health checks
     networks:
       - internal
       - public
@@ -132,37 +131,6 @@ services:
         - traefik.http.routers.litellm.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
         - traefik.http.services.litellm.loadbalancer.server.port=4000
         - traefik.http.routers.litellm.service=litellm
-
-  # Database cleanup job - prunes old spend logs to prevent disk exhaustion
-  db-cleanup:
-    image: postgres:16-alpine
-    environment:
-      PGHOST: db
-      PGUSER: ${DB_USER:-app}
-      PGPASSWORD: ${DB_PASSWORD:-app_db_PW@2018}
-      PGDATABASE: ${DB_NAME:-app}
-      RETENTION_DAYS: ${DB_CLEANUP_RETENTION_DAYS:-365}
-    command:
-      - /bin/sh
-      - -c
-      - |
-        echo "Starting database cleanup job..."
-        echo "Deleting spend logs older than $${RETENTION_DAYS} days..."
-        psql -c "DELETE FROM \"LiteLLM_SpendLogs\" WHERE \"startTime\" < NOW() - INTERVAL '$${RETENTION_DAYS} days';"
-        echo "Running VACUUM ANALYZE..."
-        psql -c "VACUUM ANALYZE \"LiteLLM_SpendLogs\";"
-        echo "Cleanup completed at $$(date)"
-    networks:
-      - internal
-    deploy:
-      mode: replicated
-      replicas: 0
-      labels:
-        - swarm.cronjob.enable=true
-        - swarm.cronjob.schedule=0 3 * * 0
-        - swarm.cronjob.skip-running=true
-      restart_policy:
-        condition: none
 
 configs:
   cli-proxy-api-config-yaml:

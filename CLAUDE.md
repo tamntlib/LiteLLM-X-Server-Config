@@ -12,7 +12,6 @@ LiteLLM-CLIProxyAPI is a self-hosted LLM proxy service combining [LiteLLM](https
 - `litellm`: Core proxy server handling API requests (LiteLLM v1.81.0)
 - `antigravity-manager`: Proxy for Anthropic Claude models using [Antigravity Manager](https://github.com/lbjlaq/antigravity-manager)
 - `db`: PostgreSQL database for LiteLLM usage logs and model configurations
-- `db-cleanup`: Scheduled job to prune old spend logs (prevents disk exhaustion)
 
 **Networks**: Internal overlay network for inter-service communication, external public network with Traefik for HTTPS routing.
 

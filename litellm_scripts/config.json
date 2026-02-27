@@ -10,22 +10,28 @@
                 "anthropic": {
                     "models": {
                         "gemini-3-flash": {
-                            "model_name": "gemini-3-flash-preview",
+                            "model_name": "gemini-3-flash-preview-strict",
                             "model_info": {
                                 "base_model": "gemini/gemini-3-flash-preview"
                             }
                         },
                         "gemini-3.1-pro-high": {
-                            "model_name": "gemini-3.1-pro-preview",
+                            "model_name": "gemini-3.1-pro-preview-strict",
                             "model_info": {
                                 "base_model": "gemini/gemini-3.1-pro-preview"
                             }
                         },
                         "claude-sonnet-4-6": {
-                            "model_name": "claude-sonnet-4-6"
+                            "model_name": "claude-sonnet-4-6-strict",
+                            "model_info": {
+                                "base_model": "claude-sonnet-4-6"
+                            }
                         },
                         "claude-opus-4-6-thinking": {
-                            "model_name": "claude-opus-4-6"
+                            "model_name": "claude-opus-4-6-strict",
+                            "model_info": {
+                                "base_model": "claude-opus-4-6"
+                            }
                         }
                     }
                 }
@@ -33,17 +39,19 @@
         }
     },
     "aliases": {
-        "claude-haiku-4-5-20251001": "gemini-3-flash-preview"
+        "claude-opus-4-6": "claude-opus-4-6-strict",
+        "claude-sonnet-4-6": "claude-sonnet-4-6-strict",
+        "claude-haiku-4-5-20251001": "gemini-3-flash-preview-strict"
     },
     "fallbacks": [
         {
             "claude-opus-4-6": [
-                "gemini-3.1-pro-preview"
+                "gemini-3.1-pro-preview-strict"
             ]
         },
         {
             "claude-sonnet-4-6": [
-                "gemini-3.1-pro-preview"
+                "gemini-3.1-pro-preview-strict"
             ]
         }
     ]
