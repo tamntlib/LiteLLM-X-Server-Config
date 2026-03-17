@@ -95,7 +95,7 @@ services:
         - traefik.http.routers.antigravity-manager.service=antigravity-manager
 
   litellm:
-    image: tamntlib/litellm-database:v1.81.16.custm-auth.dev
+    image: litellm/litellm-database:v1.82.1-nightly.2
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"

@@ -1,6 +1,24 @@
 {
     "$schema": "./config.schema.json",
     "providers": {
+        "cli-proxy-api": {
+            "access_groups": [
+                "General"
+            ],
+            "api_base": "http://cli-proxy-api:8317",
+            "interfaces": {
+                "anthropic": {
+                    "models": {
+                        "gpt-5.4": {
+                            "model_name": "gpt-5.4-strict",
+                            "model_info": {
+                                "base_model": "gpt-5.4"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "antigravity-manager": {
             "access_groups": [
                 "General"
@@ -39,20 +57,19 @@
         }
     },
     "aliases": {
-        "claude-opus-4-6": "claude-opus-4-6-strict",
-        "claude-sonnet-4-6": "claude-sonnet-4-6-strict",
-        "claude-haiku-4-5-20251001": "gemini-3-flash-preview-strict"
+        "claude-opus-4-6": "gpt-5.4-strict",
+        "claude-sonnet-4-6": "gpt-5.4-strict",
+        "claude-haiku-4-5-20251001": "gpt-5.4-strict"
     },
     "fallbacks": [
         {
-            "claude-opus-4-6": [
-                "gemini-3.1-pro-preview-strict"
-            ]
+            "claude-opus-4-6": []
         },
         {
-            "claude-sonnet-4-6": [
-                "gemini-3.1-pro-preview-strict"
-            ]
+            "claude-sonnet-4-6": []
+        },
+        {
+            "claude-haiku-4-5-20251001": []
         }
     ]
 }
