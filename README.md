@@ -1,12 +1,11 @@
 # LLM Proxy
 
-A self-hosted LLM proxy service combining [LiteLLM](https://github.com/BerriAI/litellm) and [Antigravity Manager](https://github.com/lbjlaq/antigravity-manager) to enable integration with a wider variety of LLM providers. Designed for enterprises that need centralized control over accounts and API keys. Includes monitoring capabilities and is deployed on Docker Swarm, managed via Portainer.
+A self-hosted LLM proxy service using [LiteLLM](https://github.com/BerriAI/litellm). Designed for enterprises that need centralized control over accounts and API keys. Includes monitoring capabilities and is deployed on Docker Swarm, managed via Portainer.
 
 ## Architecture
 
 **Docker Swarm Stack** (`llmproxy.yaml`) deployed via Portainer:
 - `litellm`: Core proxy server handling API requests
-- `antigravity-manager`: Proxy for Anthropic Claude models
 - `db`: PostgreSQL database for LiteLLM usage logs and model configurations
 - `db-cleanup`: Scheduled job to prune old spend logs (prevents disk exhaustion)
 
@@ -76,7 +75,6 @@ Add the following records to your DNS:
 
 - llm.example.com (for LiteLLM)
 - cli-proxy-api.llm.example.com (for CLIProxyAPI)
-- antigravity-manager.llm.example.com (for Antigravity Manager)
 
 #### Set environment variables
 
@@ -89,7 +87,6 @@ cp .env.example .env
 Required environment variables:
 - `DB_USER`, `DB_PASSWORD`, `DB_NAME`: PostgreSQL credentials
 - `LITELLM_MASTER_KEY`, `LITELLM_HOST`: LiteLLM configuration
-- `ANTIGRAVITY_MANAGER_HOST`, `ANTIGRAVITY_MANAGER_API_KEY`, `ANTIGRAVITY_MANAGER_WEB_PASSWORD`: Antigravity Manager configuration
 
 #### Set config and deploy stack
 

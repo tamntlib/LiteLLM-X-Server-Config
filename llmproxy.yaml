@@ -2,7 +2,6 @@
 volumes:
   cli-proxy-api-auth-data:
   cli-proxy-api-config-data:
-  antigravity-manager-data:
 
 x-common-healthcheck: &common-healthcheck
   interval: 30s # Perform health check every 30 seconds
@@ -42,25 +41,6 @@ x-cli-proxy-api: &cli-proxy-api
     - public
     - monitoring
 
-x-antigravity-manager: &antigravity-manager
-  image: lbjlaq/antigravity-manager:latest
-  environment:
-    - API_KEY=${ANTIGRAVITY_MANAGER_API_KEY}
-    - WEB_PASSWORD=${ANTIGRAVITY_MANAGER_WEB_PASSWORD}
-    - ABV_MAX_BODY_SIZE=104857600
-  networks:
-    - internal
-    - public
-    - monitoring
-  healthcheck:
-    <<: *common-healthcheck
-    test:
-      [
-        "CMD-SHELL",
-        "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8045/health')\"",
-      ]
-    start_period: 30s
-
 services:
   cli-proxy-api:
     <<: *cli-proxy-api
@@ -80,22 +60,8 @@ services:
         - traefik.http.services.cli-proxy-api.loadbalancer.server.port=8317
         - traefik.http.routers.cli-proxy-api.service=cli-proxy-api
 
-  antigravity-manager:
-    <<: *antigravity-manager
-    volumes:
-      - antigravity-manager-data:/root/.antigravity_tools
-    deploy:
-      <<: *common-deploy
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.antigravity-manager.rule=Host(`${ANTIGRAVITY_MANAGER_HOST}`)
-        - traefik.http.routers.antigravity-manager.entrypoints=websecure
-        - traefik.http.routers.antigravity-manager.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
-        - traefik.http.services.antigravity-manager.loadbalancer.server.port=8045
-        - traefik.http.routers.antigravity-manager.service=antigravity-manager
-
   litellm:
-    image: litellm/litellm-database:v1.82.1-nightly.2
+    image: tamntlib/litellm-database:v1.82.3-stable
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"

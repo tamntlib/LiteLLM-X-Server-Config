@@ -16,39 +16,13 @@
                             }
                         }
                     }
-                }
-            }
-        },
-        "antigravity-manager": {
-            "access_groups": [
-                "General"
-            ],
-            "api_base": "http://antigravity-manager:8045",
-            "interfaces": {
-                "anthropic": {
+                },
+                "openai": {
                     "models": {
-                        "gemini-3-flash": {
-                            "model_name": "gemini-3-flash-preview-strict",
+                        "gpt-5.4": {
+                            "model_name": "openai-gpt-5.4-strict",
                             "model_info": {
-                                "base_model": "gemini/gemini-3-flash-preview"
-                            }
-                        },
-                        "gemini-3.1-pro-high": {
-                            "model_name": "gemini-3.1-pro-preview-strict",
-                            "model_info": {
-                                "base_model": "gemini/gemini-3.1-pro-preview"
-                            }
-                        },
-                        "claude-sonnet-4-6": {
-                            "model_name": "claude-sonnet-4-6-strict",
-                            "model_info": {
-                                "base_model": "claude-sonnet-4-6"
-                            }
-                        },
-                        "claude-opus-4-6-thinking": {
-                            "model_name": "claude-opus-4-6-strict",
-                            "model_info": {
-                                "base_model": "claude-opus-4-6"
+                                "base_model": "gpt-5.4"
                             }
                         }
                     }
