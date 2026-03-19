@@ -16,16 +16,6 @@
                             }
                         }
                     }
-                },
-                "openai": {
-                    "models": {
-                        "gpt-5.4": {
-                            "model_name": "openai-gpt-5.4-strict",
-                            "model_info": {
-                                "base_model": "gpt-5.4"
-                            }
-                        }
-                    }
                 }
             }
         }
