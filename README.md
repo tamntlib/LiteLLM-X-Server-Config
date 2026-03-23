@@ -96,6 +96,7 @@ export PORTAINER_ACCESS_TOKEN=<token>
 
 # Set config
 ptctools docker config set -n llmproxy_litellm-config-yaml -f 'configs/litellm.yaml' --ownership team
+ptctools docker config set -n llmproxy_litellm-claude-code-hook-py -f 'configs/claude_code_hook.py' --ownership team
 ptctools docker config set -n llmproxy_cli-proxy-api-config-yaml -f 'configs/cli-proxy-api.yaml' --ownership team
 
 # Deploy stacks

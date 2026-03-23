@@ -75,9 +75,13 @@ services:
       SEPARATE_HEALTH_APP: "1"
       SEPARATE_HEALTH_PORT: "4001"
       LITELLM_DROP_PARAMS: "True"
+      CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS}
+      CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION}"
     configs:
       - source: litellm-config-yaml
         target: /app/config.yaml
+      - source: litellm-claude-code-hook-py
+        target: /app/claude_code_hook.py
     healthcheck: # Defines the health check configuration for the container
       <<: *common-healthcheck
       test:
@@ -104,6 +108,9 @@ configs:
     external: true
   litellm-config-yaml:
     name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm-config-yaml}
+    external: true
+  litellm-claude-code-hook-py:
+    name: ${LITELLM_CLAUDE_CODE_HOOK_NAME:-llmproxy_litellm-claude-code-hook-py}
     external: true
 
 networks:
