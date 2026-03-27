@@ -189,11 +189,11 @@ def resolve_provider_models(providers: dict) -> list:
                 model_name = model_group_name or litellm_model_name
                 base_model = base_model or model_name
 
-                # Resolve access_groups: model-level > provider-level
+                # Resolve access_groups: model-level > model_info-level > provider-level
                 resolved_access_groups = (
                     access_groups
                     if access_groups is not None
-                    else provider_access_groups
+                    else model_info_cfg.get("access_groups", provider_access_groups)
                 )
 
                 # Build model_info

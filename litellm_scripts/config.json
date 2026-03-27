@@ -14,12 +14,6 @@
                             "model_info": {
                                 "base_model": "gpt-5.4"
                             }
-                        },
-                        "gpt-5.4-mini": {
-                            "model_name": "gpt-5.4-mini-strict",
-                            "model_info": {
-                                "base_model": "azure/gpt-5.4-mini"
-                            }
                         }
                     }
                 }
@@ -29,7 +23,7 @@
     "aliases": {
         "claude-opus-4-6": "gpt-5.4-strict",
         "claude-sonnet-4-6": "gpt-5.4-strict",
-        "claude-haiku-4-5-20251001": "gpt-5.4-mini-strict"
+        "claude-haiku-4-5-20251001": "gpt-5.4-strict"
     },
     "fallbacks": [
         {
