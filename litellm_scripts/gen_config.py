@@ -13,7 +13,10 @@ Usage:
 
 import json
 import logging
+import urllib.request
+import urllib.error
 import argparse
+import re
 from pathlib import Path
 
 logging.basicConfig(
@@ -145,21 +148,173 @@ def resolve_provider_extensions(providers: dict) -> dict:
     return resolved
 
 
-def resolve_provider_models(providers: dict) -> list:
+def _fetch_openai_models(api_base: str, api_key: str) -> list[str]:
+    """Fetch models using OpenAI-compatible /v1/models endpoint (Bearer auth)."""
+    url = f"{api_base}/v1/models"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    req = urllib.request.Request(url, headers=headers)
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            data = json.loads(res.read().decode())
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from {url}: {e}")
+        return []
+
+    if isinstance(data, dict) and "data" in data:
+        return [m["id"] for m in data["data"] if isinstance(m, dict) and m.get("id")]
+
+    return []
+
+
+def _fetch_gemini_models(api_base: str, api_key: str) -> list[str]:
+    """Fetch models using Gemini /v1beta/models endpoint (Bearer auth)."""
+    url = f"{api_base}/v1beta/models"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    req = urllib.request.Request(url, headers=headers)
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            data = json.loads(res.read().decode())
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from {url}: {e}")
+        return []
+
+    if isinstance(data, dict) and "models" in data:
+        model_ids = []
+        for m in data["models"]:
+            if isinstance(m, dict) and m.get("name"):
+                name = m["name"]
+                if name.startswith("models/"):
+                    name = name[len("models/") :]
+                model_ids.append(name)
+        return model_ids
+
+    return []
+
+
+def fetch_models_from_api(api_base: str, api_key: str, provider: str) -> list[str]:
+    """Fetch available model IDs from a provider's /models endpoint.
+
+    Tries the provider-specific endpoint first, then falls back to
+    OpenAI-compatible /v1/models for anthropic and gemini interfaces.
+
+    Returns a list of model ID strings.
+    """
+    if provider == "openai":
+        return _fetch_openai_models(api_base, api_key)
+
+    if provider == "anthropic":
+        models = _fetch_anthropic_models(api_base, api_key)
+        if not models:
+            logger.info(f"Falling back to OpenAI-compatible endpoint for {api_base}")
+            models = _fetch_openai_models(api_base, api_key)
+        return models
+
+    if provider == "gemini":
+        models = _fetch_gemini_models(api_base, api_key)
+        if not models:
+            logger.info(f"Falling back to OpenAI-compatible endpoint for {api_base}")
+            models = _fetch_openai_models(api_base, api_key)
+        return models
+
+    # Unknown provider: try OpenAI-compatible
+    return _fetch_openai_models(api_base, api_key)
+
+
+def _fetch_anthropic_models(api_base: str, api_key: str) -> list[str]:
+    """Fetch models from Anthropic API with pagination support.
+
+    Anthropic uses x-api-key auth and paginates via has_more / after_id.
+    Response: {"data": [{"id": "..."}], "has_more": bool, "last_id": "..."}
+    """
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    model_ids = []
+    base_url = f"{api_base}/v1/models"
+    url = base_url
+
+    while True:
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as res:
+                data = json.loads(res.read().decode())
+        except Exception as e:
+            logger.warning(f"Failed to fetch models from {url}: {e}")
+            break
+
+        if isinstance(data, dict) and "data" in data:
+            for m in data["data"]:
+                if isinstance(m, dict) and m.get("id"):
+                    model_ids.append(m["id"])
+
+        # Handle pagination
+        if data.get("has_more") and data.get("last_id"):
+            separator = "&" if "?" in base_url else "?"
+            url = f"{base_url}{separator}after_id={data['last_id']}"
+        else:
+            break
+
+    return model_ids
+
+
+def natural_sort_key(value: str):
+    parts = re.split(r"(\d+(?:[.-]\d+)*)", value)
+    key = []
+    for part in parts:
+        if not part:
+            continue
+        if re.fullmatch(r"\d+(?:[.-]\d+)*", part):
+            key.append((0, tuple(int(token) for token in re.split(r"[.-]", part))))
+        else:
+            key.append((1, part))
+    return key
+
+
+def sort_model_payloads(model_payloads: list[dict]) -> list[dict]:
+    return sorted(
+        model_payloads,
+        key=lambda payload: (
+            natural_sort_key(payload["litellm_params"]["litellm_credential_name"]),
+            natural_sort_key(payload["model_name"]),
+        ),
+        reverse=True,
+    )
+
+
+def resolve_provider_models(providers: dict, base_model_map: dict = None) -> list:
     """Resolve providers into a flat list of LiteLLM model request bodies.
 
     For each provider, for each interface, for each model:
     1. Use interface-specific `models` from providers.<provider>.interfaces.<interface>.models
-    2. Resolve access_groups (model-level overrides provider-level)
-    3. Build the full model_name, litellm_params, and model_info
+    2. If `models` is empty, auto-fetch from the provider's /models API endpoint
+    3. Resolve base_model: explicit > model_name_base_model_map > model_name
+    4. Resolve access_groups (model-level overrides provider-level)
+    5. Build the full model_name, litellm_params, and model_info
+
+    Args:
+        providers: Resolved provider configurations
+        base_model_map: Global model_name -> base_model mapping (fallback)
 
     Returns a list of dicts ready to POST to LiteLLM's /model/new endpoint.
     """
     models = []
+    base_model_map = base_model_map or {}
 
     for service_name, provider_config in providers.items():
         provider_access_groups = provider_config.get("access_groups")
         api_key = provider_config.get("api_key")
+        api_base = provider_config.get("api_base", "")
+        models_api_base = provider_config.get("models_api_base") or api_base
 
         if not api_key:
             continue
@@ -169,11 +324,41 @@ def resolve_provider_models(providers: dict) -> list:
         for provider, iface_config in interfaces.items():
             iface = iface_config if iface_config else {}
             iface_models = iface.get("models", {})
+            autofill_disabled = iface.get("models_autofill_disabled", False)
+
+            # Auto-discover models from API unless autofill is disabled
+            if not autofill_disabled and models_api_base:
+                logger.info(
+                    f"Autofilling {service_name}/{provider}, fetching from API..."
+                )
+                fetched_ids = fetch_models_from_api(models_api_base, api_key, provider)
+                if fetched_ids:
+                    # Only add models not already explicitly defined
+                    new_ids = [m for m in fetched_ids if m not in iface_models]
+                    if new_ids:
+                        logger.info(
+                            f"Discovered {len(new_ids)} new models for "
+                            f"{service_name}/{provider}: {new_ids}"
+                        )
+                        fetched_models = {model_id: None for model_id in new_ids}
+                        # Merge: explicit definitions take precedence
+                        iface_models = {**fetched_models, **iface_models}
+                    else:
+                        logger.info(
+                            f"All {len(fetched_ids)} fetched models already defined "
+                            f"for {service_name}/{provider}"
+                        )
+                else:
+                    logger.warning(
+                        f"No models discovered for {service_name}/{provider}"
+                    )
 
             credential_name = f"{service_name}-{provider}"
 
             for litellm_model_name, model_cfg in iface_models.items():
                 if isinstance(model_cfg, dict):
+                    if model_cfg.get("ignored"):
+                        continue
                     model_group_name = model_cfg.get("model_name")
                     model_info_cfg = model_cfg.get("model_info", {})
                     base_model = model_info_cfg.get("base_model")
@@ -187,7 +372,8 @@ def resolve_provider_models(providers: dict) -> list:
                     access_groups = None
 
                 model_name = model_group_name or litellm_model_name
-                base_model = base_model or model_name
+                # Resolve base_model: explicit > map lookup > model_name
+                base_model = base_model or base_model_map.get(model_name) or model_name
 
                 # Resolve access_groups: model-level > model_info-level > provider-level
                 resolved_access_groups = (
@@ -259,7 +445,8 @@ def generate_config(config_path: Path) -> dict:
             )
 
     # Build flat models array
-    models = resolve_provider_models(providers)
+    base_model_map = config.get("model_name_base_model_map", {})
+    models = sort_model_payloads(resolve_provider_models(providers, base_model_map))
 
     # Resolve $base references in fallbacks
     fallbacks = resolve_fallback_base_refs(
@@ -267,12 +454,90 @@ def generate_config(config_path: Path) -> dict:
         base_config.get("fallbacks", []),
     )
 
+    aliases = config.get("aliases", {})
+
+    # Validate aliases and fallbacks against known models
+    model_names = {m["model_name"] for m in models}
+    validate_aliases(aliases, model_names)
+    validate_fallbacks(fallbacks, model_names, aliases)
+    validate_prices(models)
+
     return {
         "credentials": credentials,
         "models": models,
-        "aliases": config.get("aliases", {}),
+        "aliases": aliases,
         "fallbacks": fallbacks,
     }
+
+
+def validate_aliases(aliases: dict, model_names: set):
+    """Validate that alias targets point to existing models or other aliases."""
+    valid_targets = model_names | set(aliases.keys())
+    for alias_name, target in aliases.items():
+        if target not in valid_targets:
+            logger.warning(
+                f"⚠️ Alias '{alias_name}' points to non-existent model: {target}"
+            )
+
+
+def validate_fallbacks(fallbacks: list, model_names: set, aliases: dict):
+    """Validate that fallback sources and targets reference existing models or aliases."""
+    valid_targets = model_names | set(aliases.keys())
+    for fallback_rule in fallbacks:
+        for source, targets in fallback_rule.items():
+            if source not in valid_targets:
+                logger.warning(
+                    f"⚠️ Fallback source '{source}' is not a known model or alias"
+                )
+            for target in targets:
+                if target not in valid_targets:
+                    logger.warning(
+                        f"⚠️ Fallback target '{target}' for '{source}' "
+                        f"is not a known model or alias"
+                    )
+
+
+_litellm_prices_cache = None
+
+LITELLM_PRICES_URL = "https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_prices_and_context_window.json"
+
+
+def _get_litellm_prices() -> dict:
+    """Fetch and cache LiteLLM model pricing data from GitHub."""
+    global _litellm_prices_cache
+    if _litellm_prices_cache is not None:
+        return _litellm_prices_cache
+
+    try:
+        req = urllib.request.Request(LITELLM_PRICES_URL)
+        with urllib.request.urlopen(req, timeout=30) as res:
+            _litellm_prices_cache = json.loads(res.read().decode())
+    except Exception as e:
+        logger.warning(f"Failed to fetch LiteLLM pricing data: {e}")
+        _litellm_prices_cache = {}
+
+    return _litellm_prices_cache
+
+
+def validate_prices(models: list):
+    """Validate that each model's base_model exists in LiteLLM pricing data."""
+    prices = _get_litellm_prices()
+    if not prices:
+        logger.warning("⚠️ Skipping price validation (no pricing data available)")
+        return
+
+    missing = []
+    for model in models:
+        base_model = model.get("model_info", {}).get("base_model", "")
+        if base_model and base_model not in prices:
+            missing.append(base_model)
+
+    if missing:
+        unique_missing = sorted(set(missing))
+        logger.warning(
+            f"⚠️ {len(unique_missing)} base_model(s) not found in LiteLLM pricing: "
+            f"{unique_missing}"
+        )
 
 
 # ============================================================================

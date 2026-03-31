@@ -68,6 +68,7 @@ services:
       STORE_MODEL_IN_DB: "True" # allows adding models to proxy via UI
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-litellm_master_key}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-litellm_salt_key}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       LITELLM_MODE: PRODUCTION
       LITELLM_LOG: ERROR
       JSON_LOGS: "True"

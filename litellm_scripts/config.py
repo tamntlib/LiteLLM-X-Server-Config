@@ -30,7 +30,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from load_dotenv import load_dotenv
 
-from gen_config import generate_config
+from gen_config import generate_config, validate_aliases, validate_fallbacks
 
 logging.basicConfig(
     level=logging.INFO,
@@ -374,13 +374,7 @@ def update_aliases(aliases: dict, force=False):
         logger.info(f"✅ Updated {len(aliases)} model group aliases")
         # Validate aliases point to existing models or other aliases
         existing_models = {model_name for model_name, _, _ in get_all_models()}
-        alias_names = set(aliases.keys())
-        valid_targets = existing_models | alias_names
-        for alias_name, target_model in aliases.items():
-            if target_model not in valid_targets:
-                logger.warning(
-                    f"⚠️ Alias '{alias_name}' points to non-existent model: {target_model}"
-                )
+        validate_aliases(aliases, existing_models)
     else:
         logger.error(f"❌ Failed to update aliases: {result}")
 
@@ -414,19 +408,8 @@ def update_fallbacks(fallbacks: list, force=False):
         logger.info(f"✅ Updated {len(fallbacks)} fallback rules")
         # Validate fallbacks reference existing models or aliases
         existing_models = {model_name for model_name, _, _ in get_all_models()}
-        current_aliases = set(get_current_aliases().keys())
-        valid_targets = existing_models | current_aliases
-        for fallback_rule in fallbacks:
-            for source_model, target_models in fallback_rule.items():
-                if source_model not in valid_targets:
-                    logger.warning(
-                        f"⚠️ Fallback source '{source_model}' is a non-existent model or alias"
-                    )
-                for target_model in target_models:
-                    if target_model not in valid_targets:
-                        logger.warning(
-                            f"⚠️ Fallback target '{target_model}' for '{source_model}' is a non-existent model or alias"
-                        )
+        current_aliases = get_current_aliases()
+        validate_fallbacks(fallbacks, existing_models, current_aliases)
     else:
         logger.error(f"❌ Failed to update fallbacks: {result}")
 
