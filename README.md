@@ -1,35 +1,26 @@
 # LLM Proxy
 
-A self-hosted LLM proxy service using [LiteLLM](https://github.com/BerriAI/litellm). Designed for enterprises that need centralized control over accounts and API keys. Includes monitoring capabilities and is deployed on Docker Swarm, managed via Portainer.
+A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, and Netdata. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer.
 
 ## Architecture
 
-**Docker Swarm Stack** (`llmproxy.yaml`) deployed via Portainer:
-- `litellm`: Core proxy server handling API requests
-- `db`: PostgreSQL database for LiteLLM usage logs and model configurations
-- `db-cleanup`: Scheduled job to prune old spend logs (prevents disk exhaustion)
+This repository is deployed as multiple Docker Swarm stacks:
 
-**Networks**: Internal overlay network for inter-service communication, external public network with Traefik for HTTPS routing.
+### Application data stack (`llmproxy-data.yaml`)
+- `db`: PostgreSQL database for LiteLLM state, usage logs, and model configuration
 
-## Disk Management
+### Application stack (`llmproxy.yaml`)
+- `cli-proxy-api`: Anthropic-compatible proxy and auth service
+- `litellm`: Core routing layer and LiteLLM admin UI
 
-The stack includes automatic cleanup mechanisms to prevent disk exhaustion:
+### Monitoring stack (`monitoring/netdata.yaml`)
+- `netdata`: Host and container monitoring dashboard
+- `config-generator`: Sidecar that watches Docker labels and generates Netdata collector configs
 
-### Database Cleanup
-
-The `db-cleanup` service runs weekly (Sunday 3:00 AM) to prune old spend logs:
-- Deletes logs older than 90 days (configurable via `DB_CLEANUP_RETENTION_DAYS`)
-- Runs `VACUUM ANALYZE` to reclaim disk space
-- Uses [swarm-cronjob](https://github.com/crazy-max/swarm-cronjob) for scheduling
-
-To run cleanup manually:
-```sh
-docker service scale llmproxy_db-cleanup=1
-```
-
-### Netdata Metrics Storage
-
-Netdata is configured to limit disk usage to 10GB (`monitoring/configs/netdata.conf`), providing approximately 2-4 weeks of metrics retention.
+### Networks
+- `internal`: private overlay network between application services and PostgreSQL
+- `public`: external Traefik network for HTTPS routing
+- `monitoring`: shared overlay network used by Netdata auto-discovery
 
 ## Prerequisites
 
@@ -44,11 +35,11 @@ uv tool install ptctools --from git+https://github.com/tamntlib/ptctools.git
 
 #### Set DNS records for Portainer
 
-Add the following records to your DNS:
+Add the following record to your DNS:
 
-- portainer.example.com
+- `portainer.example.com`
 
-#### Copy file portainer.yaml to server
+#### Copy file `portainer.yaml` to server
 
 ```sh
 scp portainer/portainer.yaml root@<ip>:/root/portainer.yaml
@@ -56,7 +47,7 @@ scp portainer/portainer.yaml root@<ip>:/root/portainer.yaml
 
 #### SSH to server
 
-##### Install docker
+##### Install Docker
 
 <https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository>
 
@@ -67,14 +58,44 @@ docker swarm init
 LETSENCRYPT_EMAIL=<email> PORTAINER_HOST=<host> docker stack deploy -c /root/portainer.yaml portainer
 ```
 
-### 2. Deploy LLM Proxy from local machine
+### 2. Deploy the monitoring stack
+
+Deploy this first so the shared `monitoring` overlay network exists before the application stacks join it.
+
+#### Set DNS records
+
+Add the following record to your DNS:
+
+- `netdata.example.com`
+
+#### Set environment variables
+
+Copy `monitoring/.env.example` to `monitoring/.env` and fill in the values:
+
+```sh
+cp monitoring/.env.example monitoring/.env
+```
+
+Required environment variables:
+- `NETDATA_HOST`: Hostname for the Netdata dashboard
+- `NETDATA_BASIC_AUTH`: Basic auth credentials for Traefik
+
+#### Create configs and deploy
+
+```sh
+ptctools docker config set -n monitoring_netdata-conf -f 'monitoring/configs/netdata.conf'
+ptctools docker config set -n monitoring_config-generator-script -f 'monitoring/scripts/netdata-config-generator.sh'
+ptctools docker stack deploy -n monitoring -f 'monitoring/netdata.yaml' --ownership team
+```
+
+### 3. Deploy the application stacks from your local machine
 
 #### Set DNS records
 
 Add the following records to your DNS:
 
-- llm.example.com (for LiteLLM)
-- cli-proxy-api.llm.example.com (for CLIProxyAPI)
+- `llm.example.com` (LiteLLM)
+- `cli-proxy-api.llm.example.com` (CLIProxyAPI)
 
 #### Set environment variables
 
@@ -86,28 +107,35 @@ cp .env.example .env
 
 Required environment variables:
 - `DB_USER`, `DB_PASSWORD`, `DB_NAME`: PostgreSQL credentials
-- `LITELLM_MASTER_KEY`, `LITELLM_HOST`: LiteLLM configuration
+- `LITELLM_HOST`, `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`: LiteLLM configuration
+- `CLI_PROXY_API_HOST`: CLIProxyAPI hostname
 
-#### Set config and deploy stack
+Optional environment variables used by the stack:
+- `CLAUDE_CODE_MODELS`: Comma-separated model names that should enforce Claude Code checks
+- `CLAUDE_CODE_MIN_VERSION`: Minimum allowed Claude Code version for those models
+- `SLACK_WEBHOOK_URL`: LiteLLM Slack webhook
+
+#### Upload configs and deploy
 
 ```sh
 export PORTAINER_URL=https://portainer.example.com
 export PORTAINER_ACCESS_TOKEN=<token>
 
-# Set config
 ptctools docker config set -n llmproxy_litellm-config-yaml -f 'configs/litellm.yaml' --ownership team
 ptctools docker config set -n llmproxy_litellm-claude-code-hook-py -f 'configs/claude_code_hook.py' --ownership team
 ptctools docker config set -n llmproxy_cli-proxy-api-config-yaml -f 'configs/cli-proxy-api.yaml' --ownership team
 
-# Deploy stacks
 ptctools docker stack deploy -n llmproxy-data -f 'llmproxy-data.yaml' --ownership team
 ptctools docker stack deploy -n llmproxy -f 'llmproxy.yaml' --ownership team
 ```
 
-## LiteLLM Management
+## LiteLLM management
 
 ```sh
 cd litellm_scripts
+
+# Generate a resolved config from config.json + config.local.json
+python3 gen_config.py
 
 # Full sync of credentials, models, aliases, and fallbacks
 python3 config.py --only credentials,models,aliases,fallbacks --force --prune
@@ -116,25 +144,35 @@ python3 config.py --only credentials,models,aliases,fallbacks --force --prune
 python3 config.py --only models --force
 python3 config.py --only aliases,fallbacks
 
-# Create API key
-python3 create_api_key.py
+# Create a LiteLLM user and API key
+python3 create_api_key.py user@example.com
+python3 create_api_key.py user@example.com --alias my-key
 ```
 
-Requires environment variables in `litellm_scripts/.env`: `LITELLM_API_KEY`, `LITELLM_BASE_URL`
+Required environment variables in `litellm_scripts/.env`:
+- `LITELLM_API_KEY`
+- `LITELLM_BASE_URL`
 
-## Configuration Files
+## Configuration files
 
 | File | Description |
 |------|-------------|
-| `llmproxy.yaml` | Docker Stack definition with all services and Traefik labels |
-| `configs/litellm.yaml` | LiteLLM internal config (batch writes, connection pools, logging) |
-| `litellm_scripts/config.json` | Base config defining providers, model groups, aliases, and fallbacks |
-| `litellm_scripts/config.local.json` | Local overrides including API keys (gitignored, deep-merged with config.json) |
-| `.env` | Environment variables (DB credentials, hostnames, API keys) |
+| `llmproxy-data.yaml` | PostgreSQL Docker Swarm stack |
+| `llmproxy.yaml` | Application Docker Swarm stack for LiteLLM and CLIProxyAPI |
+| `monitoring/netdata.yaml` | Monitoring stack with Netdata and the label-watching config generator |
+| `configs/litellm.yaml` | LiteLLM runtime config (callbacks, DB batching, connection pool settings) |
+| `configs/cli-proxy-api.yaml` | CLIProxyAPI runtime config |
+| `configs/claude_code_hook.py` | LiteLLM callback that enforces Claude Code User-Agent and minimum version rules |
+| `litellm_scripts/config.json` | Base provider/model/alias/fallback config |
+| `litellm_scripts/config.local.json` | Local overrides including API keys (gitignored, deep-merged with `config.json`) |
+| `litellm_scripts/config.gen.json` | Generated resolved config output from `gen_config.py` |
+| `.env` | Environment variables for the application stacks |
+| `monitoring/.env` | Environment variables for the monitoring stack |
 
-### Local Configuration (config.local.json)
+### Local configuration (`config.local.json`)
 
 Create `litellm_scripts/config.local.json` to add API keys and local overrides:
+
 ```json
 {
   "providers": {
@@ -148,9 +186,9 @@ Create `litellm_scripts/config.local.json` to add API keys and local overrides:
 }
 ```
 
-This file is deep-merged with `config.json`, so you only need to specify overrides (like API keys).
+This file is deep-merged with `config.json`, so you only need to specify overrides. Provider configs can also use `$extend` in `config.json` and override or disable inheritance in `config.local.json`.
 
-### Model-level access_groups
+### Model-level `access_groups`
 
 Individual models can override the provider-level `access_groups` by specifying `access_groups` in their model config:
 
@@ -173,15 +211,15 @@ Individual models can override the provider-level `access_groups` by specifying 
 - `model-a` inherits the provider-level `access_groups`: `["General"]`
 - `model-b` uses its own `access_groups`: `["Premium"]`
 
-## Backup and Restore
+## Backup and restore
 
 ```sh
 # Volume backup/restore (uses Duplicati)
 ptctools docker volume backup -v vol1,vol2 -o s3://mybucket
-ptctools docker volume restore -i s3://mybucket/vol1  # volume name derived from URI path
-ptctools docker volume restore -v vol1 -i s3://mybucket/vol1  # explicit volume name
+ptctools docker volume restore -i s3://mybucket/vol1
+ptctools docker volume restore -v vol1 -i s3://mybucket/vol1
 
-# Database backup/restore (uses minio/mc for S3) or can backup/restore db volume like above
+# Database backup/restore (uses minio/mc for S3)
 ptctools docker db backup -c container_id -v db_data \
   --db-user postgres --db-name mydb -o backup.sql.gz
 ptctools docker db backup -c container_id -v db_data \
@@ -195,42 +233,13 @@ ptctools docker db restore -c container_id -v db_data \
 
 ## Monitoring
 
-Netdata monitoring stack with auto-discovery for system, container, and database metrics.
+Netdata collects host, container, and PostgreSQL metrics.
 
-### Deploy Monitoring Stack
+### Metrics retention
 
-#### Set DNS records
+Netdata limits local metrics storage to 10 GiB in `monitoring/configs/netdata.conf`, which provides roughly 2-4 weeks of retention depending on metric volume.
 
-Add the following record to your DNS:
-
-- netdata.example.com
-
-#### Set environment variables
-
-Copy `monitoring/.env.example` to `monitoring/.env` and fill in the values:
-
-```sh
-cp monitoring/.env.example monitoring/.env
-```
-
-Required environment variables:
-- `NETDATA_HOST`: Hostname for Netdata dashboard
-- `NETDATA_BASIC_AUTH`: Basic auth credentials (generate with `htpasswd -nb admin yourpassword | sed -e s/\\$/\\$\\$/g`)
-
-#### Create secrets and deploy
-
-```sh
-cd monitoring
-
-# Upload configs
-ptctools docker config set -n monitoring_netdata-conf -f 'configs/netdata.conf'
-ptctools docker config set -n monitoring_config-generator-script -f 'scripts/netdata-config-generator.sh'
-
-# Deploy monitoring stack
-ptctools docker stack deploy -n monitoring -f 'netdata.yaml' --ownership team
-```
-
-### Auto-Discovery
+### Auto-discovery
 
 Services can self-register for PostgreSQL monitoring by adding Docker labels:
 
@@ -244,4 +253,4 @@ networks:
   - monitoring
 ```
 
-The service must also join the `monitoring` network. See `CLAUDE.md` for full details.
+The service must also join the shared `monitoring` network so the Netdata stack can reach it.

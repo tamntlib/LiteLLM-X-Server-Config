@@ -13,6 +13,17 @@
                             "ignored": true
                         }
                     }
+                },
+                "openai": {
+                    "models": {
+                        "gpt-5.4": {
+                            "model_name": "openai/gpt-5.4",
+                            "model_info": {
+                                "base_model": "gpt-5.4"
+                            }
+                        }
+                    },
+                    "models_autofill_disabled": true
                 }
             }
         },

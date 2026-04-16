@@ -225,14 +225,7 @@ def get_all_models():
     success, result = get_request("v2/model/info?include_team_models=true")
     if not success:
         return []
-    models = []
-    for model in result.get("data", []):
-        model_name = model.get("model_name")
-        credential_name = model.get("litellm_params", {}).get("litellm_credential_name")
-        model_id = model.get("model_info", {}).get("id")
-        if model_name and model_id:
-            models.append((model_name, credential_name, model_id))
-    return models
+    return result.get("data", [])
 
 
 def delete_model_by_id(model_id):
@@ -247,7 +240,7 @@ def _create_model(payload, force, actor, existing_models_cache):
         payload: Dict with model_name, litellm_params, model_info (from gen_config)
         force: Whether to replace existing models
         actor: Actor identifier for audit fields
-        existing_models_cache: Dict of (model_name, credential_name) -> [model_ids]
+        existing_models_cache: Dict of (model_name, credential_name) -> [raw model objects]
 
     Returns:
         (success, action, duplicates_deleted)
@@ -257,14 +250,14 @@ def _create_model(payload, force, actor, existing_models_cache):
 
     # Check if model exists using cached models (could have multiple duplicates)
     model_key = (full_model_name, credential_name)
-    model_ids = existing_models_cache.get(model_key, [])
+    existing_models = existing_models_cache.get(model_key, [])
     duplicates_deleted = 0
 
-    if model_ids:
+    if existing_models:
         if force:
-            for model_id in model_ids:
-                delete_model_by_id(model_id)
-            duplicates_deleted = len(model_ids) - 1
+            for model in existing_models:
+                delete_model_by_id(model["model_info"]["id"])
+            duplicates_deleted = len(existing_models) - 1
             action = "replaced"
         else:
             logger.info(f"Skipped model: {full_model_name} ({credential_name})")
@@ -280,14 +273,20 @@ def _create_model(payload, force, actor, existing_models_cache):
 
     # Add audit fields to model_info
     model_info = dict(payload.get("model_info", {}))
+    if existing_models:
+        existing_model_info = existing_models[0]["model_info"]
+        if existing_model_info.get("created_at"):
+            model_info["created_at"] = existing_model_info["created_at"]
+        if existing_model_info.get("created_by"):
+            model_info["created_by"] = existing_model_info["created_by"]
     model_info.update(
         {
             "updated_at": now_iso_string,
             "updated_by": actor,
-            "created_at": now_iso_string,
-            "created_by": actor,
         }
     )
+    model_info.setdefault("created_at", now_iso_string)
+    model_info.setdefault("created_by", actor)
 
     request_body = {
         "model_name": full_model_name,
@@ -373,7 +372,7 @@ def update_aliases(aliases: dict, force=False):
     if success:
         logger.info(f"✅ Updated {len(aliases)} model group aliases")
         # Validate aliases point to existing models or other aliases
-        existing_models = {model_name for model_name, _, _ in get_all_models()}
+        existing_models = {model["model_name"] for model in get_all_models()}
         validate_aliases(aliases, existing_models)
     else:
         logger.error(f"❌ Failed to update aliases: {result}")
@@ -407,7 +406,7 @@ def update_fallbacks(fallbacks: list, force=False):
     if success:
         logger.info(f"✅ Updated {len(fallbacks)} fallback rules")
         # Validate fallbacks reference existing models or aliases
-        existing_models = {model_name for model_name, _, _ in get_all_models()}
+        existing_models = {model["model_name"] for model in get_all_models()}
         current_aliases = get_current_aliases()
         validate_fallbacks(fallbacks, existing_models, current_aliases)
     else:
@@ -480,14 +479,17 @@ async def sync_models(config: dict, force=False, prune=False):
     deleted_count = 0
     failed_count = 0
 
-    # Cache existing models once before processing (store list of IDs to handle duplicates)
+    # Cache existing models once before processing (store matching raw model objects)
     existing_models_cache = {}
     all_models = get_all_models()
-    for model_name, credential_name, model_id in all_models:
-        key = (model_name, credential_name)
+    for model in all_models:
+        key = (
+            model["model_name"],
+            model["litellm_params"]["litellm_credential_name"],
+        )
         if key not in existing_models_cache:
             existing_models_cache[key] = []
-        existing_models_cache[key].append(model_id)
+        existing_models_cache[key].append(model)
 
     # Count total unique model groups and warn about duplicates
     total_models = sum(len(ids) for ids in existing_models_cache.values())
@@ -527,7 +529,10 @@ async def sync_models(config: dict, force=False, prune=False):
     if prune:
         logger.info("Pruning unused models...")
         existing_models = get_all_models()
-        for model_name, credential_name, model_id in existing_models:
+        for model in existing_models:
+            model_name = model["model_name"]
+            credential_name = model["litellm_params"]["litellm_credential_name"]
+            model_id = model["model_info"]["id"]
             if (model_name, credential_name) not in expected_models:
                 logger.info(f"Pruning model: {model_name} ({credential_name})")
                 success, result = post_request("model/delete", {"id": model_id})
