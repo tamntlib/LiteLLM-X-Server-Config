@@ -61,6 +61,7 @@
         "MiniMax-M2.5": "minimax/MiniMax-M2.5"
     },
     "aliases": {
+        "claude-opus-4-7": "gpt-5.4",
         "claude-opus-4-6": "gpt-5.4",
         "claude-sonnet-4-6": "gpt-5.4",
         "claude-haiku-4-5-20251001": "gpt-5.4"

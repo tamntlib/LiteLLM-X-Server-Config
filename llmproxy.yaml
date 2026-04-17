@@ -61,7 +61,7 @@ services:
         - traefik.http.routers.cli-proxy-api.service=cli-proxy-api
 
   litellm:
-    image: tamntlib/litellm-database:v1.82.3-stable.patch.2
+    image: tamntlib/litellm-database:v1.83.3-stable
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
@@ -69,6 +69,7 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-litellm_master_key}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-litellm_salt_key}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      LITELLM_LICENSE: ${LITELLM_LICENSE:-}
       LITELLM_MODE: PRODUCTION
       LITELLM_LOG: ERROR
       JSON_LOGS: "True"
