@@ -166,7 +166,7 @@ Required environment variables in `litellm_scripts/.env`:
 | `configs/claude_code_hook.py` | LiteLLM callback that enforces Claude Code User-Agent and minimum version rules |
 | `litellm_scripts/config.json` | Base provider/model/alias/fallback/public-model-hub config |
 | `litellm_scripts/config.local.json` | Local overrides including API keys (gitignored, deep-merged with `config.json`) |
-| `litellm_scripts/config.gen.json` | Generated resolved config output from `gen_config.py` |
+| `litellm_scripts/config.gen.json` | Generated resolved config output from `gen_config.py` with LiteLLM-ready credential and model request bodies |
 | `.env` | Environment variables for the application stacks |
 | `monitoring/.env` | Environment variables for the monitoring stack |
 
@@ -188,6 +188,34 @@ Create `litellm_scripts/config.local.json` to add API keys and local overrides:
 ```
 
 This file is deep-merged with `config.json`, so you only need to specify overrides. Provider configs can also use `$extend` in `config.json` and override or disable inheritance in `config.local.json`.
+
+### Interface-level `api_base`
+
+Each interface may override the provider-level `api_base`. This is useful when a single provider exposes different OpenAI-compatible and Anthropic-compatible endpoints.
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "api_base": "https://shared-gateway.example.com",
+      "interfaces": {
+        "anthropic": {
+          "api_base": "https://custom-anthropic.example.com"
+        },
+        "openai": {
+          "api_base": "https://custom-openai.example.com/v1"
+        }
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- interface-level `api_base` overrides the provider-level `api_base` for credential generation and interface-specific model discovery
+- interface-level `models_api_base` may be set separately when the `/models` endpoint lives on a different base URL
+- if interface `models_api_base` is omitted, model discovery falls back to interface `api_base`, then provider-level `models_api_base`, then provider-level `api_base`
 
 ### `public_model_hub` and `is_public_model_hub`
 
@@ -237,6 +265,12 @@ Rules:
 
 Each interface may define `model_name_prefix` to control derived model group names. When omitted, it defaults to the interface name.
 
+Default examples:
+
+- `interfaces.anthropic.models.claude-sonnet-4-6` resolves to `anthropic/claude-sonnet-4-6`
+- `interfaces.openai.models.gpt-5.4` resolves to `openai/gpt-5.4`
+- `interfaces.gemini.models.gemini-2.5-pro` resolves to `gemini/gemini-2.5-pro`
+
 ```json
 {
   "providers": {
@@ -254,7 +288,16 @@ Each interface may define `model_name_prefix` to control derived model group nam
 }
 ```
 
-With no explicit `model_name`, the generated model group name becomes `<model_name_prefix>/<model-id>`. If `model_name` is set on a model, it still wins.
+With no explicit `model_name`, the generated model group name becomes `<model_name_prefix>/<model-id>`. In the example above, `claude-sonnet-4-6` resolves to `anthropic/claude-sonnet-4-6`.
+
+If `model_name` is set on a model, it still wins and fully overrides the derived prefix-based name.
+
+These resolved prefixed names are the ones used by generated models and should be the names you reference in:
+
+- `aliases` targets
+- `fallbacks`
+- `public_model_hub`
+- `model_name_base_model_map` entries when you want to key by resolved model name instead of raw provider model ID
 
 ### Model-level `access_groups`
 

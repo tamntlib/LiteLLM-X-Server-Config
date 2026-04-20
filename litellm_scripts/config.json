@@ -12,14 +12,14 @@
                 "openai": {}
             }
         },
-        "alibabacloud-anthropic": {
+        "alibabacloud": {
             "access_groups": [
                 "General"
             ],
-            "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
             "is_public_model_hub": true,
             "interfaces": {
                 "anthropic": {
+                    "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
                     "models": {
                         "qwen3.5-plus": {},
                         "qwen3-max-2026-01-23": {},
@@ -31,17 +31,9 @@
                         "MiniMax-M2.5": {}
                     },
                     "models_autofill_disabled": true
-                }
-            }
-        },
-        "alibabacloud-openai": {
-            "access_groups": [
-                "General"
-            ],
-            "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
-            "is_public_model_hub": true,
-            "interfaces": {
+                },
                 "openai": {
+                    "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
                     "models": {
                         "qwen3.5-plus": {},
                         "qwen3-max-2026-01-23": {},

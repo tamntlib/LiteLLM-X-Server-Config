@@ -119,6 +119,14 @@
             "type": "object",
             "description": "Interface-specific configuration",
             "properties": {
+                "api_base": {
+                    "type": "string",
+                    "description": "Base URL override for this interface. Defaults to the provider-level api_base."
+                },
+                "models_api_base": {
+                    "type": "string",
+                    "description": "Base URL override for this interface's /models listing endpoint. Defaults to interface api_base, then provider-level models_api_base, then provider-level api_base."
+                },
                 "models_autofill_disabled": {
                     "type": "boolean",
                     "description": "Set to true to disable auto-fetching models from the provider's API. Autofill is enabled by default."

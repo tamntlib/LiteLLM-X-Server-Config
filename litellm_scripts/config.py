@@ -50,21 +50,6 @@ LITELLM_BASE_URL = os.environ["LITELLM_BASE_URL"]
 
 DEFAULT_CONFIG_FILE = "config.json"
 
-PROVIDER_CONFIG = {
-    "openai": {
-        "path_suffix": "/v1",
-        "custom_llm_provider": "OpenAI_Compatible",
-    },
-    "gemini": {
-        "path_suffix": "/v1beta",
-        "custom_llm_provider": "Google_AI_Studio",
-    },
-    "anthropic": {
-        "path_suffix": "",
-        "custom_llm_provider": "Anthropic",
-    },
-}
-
 
 # ============================================================================
 # Utility Functions
@@ -167,10 +152,8 @@ def delete_credential(credential_name):
     return delete_request(f"credentials/{credential_name}")
 
 
-def create_credential(service_name, provider, api_key, api_base, force=False):
-    provider_cfg = PROVIDER_CONFIG[provider]
-    path_suffix = provider_cfg["path_suffix"]
-    credential_name = f"{service_name}-{provider}"
+def create_credential(request_body, force=False):
+    credential_name = request_body["credential_name"]
 
     if credential_exists(credential_name):
         if force:
@@ -182,30 +165,16 @@ def create_credential(service_name, provider, api_key, api_base, force=False):
     else:
         action = "created"
 
-    success, result = post_request(
-        "credentials",
-        {
-            "credential_name": credential_name,
-            "credential_values": {
-                "api_key": api_key,
-                "api_base": f"{api_base}{path_suffix}",
-            },
-            "credential_info": {
-                "custom_llm_provider": provider_cfg["custom_llm_provider"]
-            },
-        },
-    )
+    success, result = post_request("credentials", request_body)
     return success, result, action
 
 
-async def create_credential_async(
-    executor, service_name, provider, api_key, api_base, force=False
-):
+async def create_credential_async(executor, request_body, force=False):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
-        executor, create_credential, service_name, provider, api_key, api_base, force
+        executor, create_credential, request_body, force
     )
-    credential_name = f"{service_name}-{provider}"
+    credential_name = request_body["credential_name"]
     if len(result) == 2:
         success, msg = result
         return success, msg
@@ -491,21 +460,16 @@ async def sync_credentials(config: dict, force=False, prune=False):
         tasks = []
 
         for cred in credentials:
-            service_name = cred["service_name"]
-            provider = cred["provider"]
-            api_key = cred["api_key"]
-            api_base = cred["api_base"]
-
-            if provider not in PROVIDER_CONFIG:
-                logger.warning(f"Unknown provider: {provider}, skipping")
+            if not (
+                isinstance(cred, dict)
+                and cred.get("credential_name")
+                and isinstance(cred.get("credential_values"), dict)
+            ):
+                logger.warning(f"Invalid credential config, skipping: {cred}")
                 continue
 
-            expected_credentials.add(f"{service_name}-{provider}")
-            tasks.append(
-                create_credential_async(
-                    executor, service_name, provider, api_key, api_base, force
-                )
-            )
+            expected_credentials.add(cred["credential_name"])
+            tasks.append(create_credential_async(executor, cred, force))
 
         await asyncio.gather(*tasks)
 

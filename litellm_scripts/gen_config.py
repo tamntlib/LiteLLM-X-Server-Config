@@ -28,6 +28,21 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG_FILE = "config.json"
 DEFAULT_OUTPUT_FILE = "config.gen.json"
 
+PROVIDER_CONFIG = {
+    "openai": {
+        "path_suffix": "/v1",
+        "custom_llm_provider": "OpenAI_Compatible",
+    },
+    "gemini": {
+        "path_suffix": "/v1beta",
+        "custom_llm_provider": "Google_AI_Studio",
+    },
+    "anthropic": {
+        "path_suffix": "",
+        "custom_llm_provider": "Anthropic",
+    },
+}
+
 
 # ============================================================================
 # Utility Functions
@@ -148,9 +163,64 @@ def resolve_provider_extensions(providers: dict) -> dict:
     return resolved
 
 
+def _join_api_base(api_base: str, path_suffix: str) -> str:
+    """Append a path suffix once, tolerating already-suffixed base URLs."""
+    normalized_base = api_base.rstrip("/")
+    normalized_suffix = path_suffix.strip("/")
+
+    if not normalized_suffix:
+        return normalized_base or api_base
+
+    if not normalized_base:
+        return f"/{normalized_suffix}"
+
+    if normalized_base.endswith(f"/{normalized_suffix}"):
+        return normalized_base
+
+    return f"{normalized_base}/{normalized_suffix}"
+
+
+def _get_interface_api_base(provider_config: dict, iface: dict) -> str:
+    """Resolve the API base for a specific interface."""
+    if "api_base" in iface:
+        return iface.get("api_base", "")
+    return provider_config.get("api_base", "")
+
+
+def _get_interface_models_api_base(provider_config: dict, iface: dict) -> str:
+    """Resolve the /models API base for a specific interface."""
+    if "models_api_base" in iface:
+        return iface.get("models_api_base", "")
+    if "api_base" in iface:
+        return iface.get("api_base", "")
+    if "models_api_base" in provider_config:
+        return provider_config.get("models_api_base", "")
+    return provider_config.get("api_base", "")
+
+
+def build_credential_payload(
+    service_name: str, provider: str, api_key: str, api_base: str
+) -> dict:
+    """Build a LiteLLM credential create request body."""
+    provider_cfg = PROVIDER_CONFIG[provider]
+    credential_name = f"{service_name}-{provider}"
+    path_suffix = provider_cfg["path_suffix"]
+
+    return {
+        "credential_name": credential_name,
+        "credential_values": {
+            "api_key": api_key,
+            "api_base": _join_api_base(api_base, path_suffix),
+        },
+        "credential_info": {
+            "custom_llm_provider": provider_cfg["custom_llm_provider"]
+        },
+    }
+
+
 def _fetch_openai_models(api_base: str, api_key: str) -> list[str]:
     """Fetch models using OpenAI-compatible /v1/models endpoint (Bearer auth)."""
-    url = f"{api_base}/v1/models"
+    url = f"{_join_api_base(api_base, '/v1')}/models"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -172,7 +242,7 @@ def _fetch_openai_models(api_base: str, api_key: str) -> list[str]:
 
 def _fetch_gemini_models(api_base: str, api_key: str) -> list[str]:
     """Fetch models using Gemini /v1beta/models endpoint (Bearer auth)."""
-    url = f"{api_base}/v1beta/models"
+    url = f"{_join_api_base(api_base, '/v1beta')}/models"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -240,7 +310,7 @@ def _fetch_anthropic_models(api_base: str, api_key: str) -> list[str]:
         "Content-Type": "application/json",
     }
     model_ids = []
-    base_url = f"{api_base}/v1/models"
+    base_url = f"{_join_api_base(api_base, '/v1')}/models"
     url = base_url
 
     while True:
@@ -296,7 +366,7 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
 
     For each provider, for each interface, for each model:
     1. Use interface-specific `models` from providers.<provider>.interfaces.<interface>.models
-    2. If `models` is empty, auto-fetch from the provider's /models API endpoint
+    2. If `models` is empty, auto-fetch from the interface/provider /models API endpoint
     3. Resolve base_model: explicit > model_name_base_model_map > model_name
     4. Resolve access_groups (model-level overrides provider-level)
     5. Resolve public model hub visibility (model-level overrides provider-level)
@@ -316,8 +386,6 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
         provider_access_groups = provider_config.get("access_groups")
         provider_is_public_model_hub = provider_config.get("is_public_model_hub", False)
         api_key = provider_config.get("api_key")
-        api_base = provider_config.get("api_base", "")
-        models_api_base = provider_config.get("models_api_base") or api_base
 
         if not api_key:
             continue
@@ -329,6 +397,7 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
             iface_models = iface.get("models", {})
             autofill_disabled = iface.get("models_autofill_disabled", False)
             model_name_prefix = iface.get("model_name_prefix", provider)
+            models_api_base = _get_interface_models_api_base(provider_config, iface)
 
             # Auto-discover models from API unless autofill is disabled
             if not autofill_disabled and models_api_base:
@@ -440,7 +509,7 @@ def generate_config(config_path: Path) -> dict:
 
     Returns dict with:
     - models: list of LiteLLM /model/new request bodies
-    - credentials: list of credential definitions
+    - credentials: list of LiteLLM /credentials request bodies
     - aliases: model alias mappings
     - fallbacks: fallback rules
     - public_model_hub: derived model groups plus explicit aliases to expose in the public model hub
@@ -452,18 +521,23 @@ def generate_config(config_path: Path) -> dict:
     # Build credentials list
     credentials = []
     for service_name, provider_config in providers.items():
-        api_base = provider_config.get("api_base", "")
         api_key = provider_config.get("api_key")
         if not api_key:
             continue
-        for provider in provider_config.get("interfaces", {}).keys():
+        for provider, iface_config in provider_config.get("interfaces", {}).items():
+            if provider not in PROVIDER_CONFIG:
+                logger.warning(
+                    f"Unknown provider '{provider}' for credentials, skipping"
+                )
+                continue
+            iface = iface_config if iface_config else {}
             credentials.append(
-                {
-                    "service_name": service_name,
-                    "provider": provider,
-                    "api_key": api_key,
-                    "api_base": api_base,
-                }
+                build_credential_payload(
+                    service_name,
+                    provider,
+                    api_key,
+                    _get_interface_api_base(provider_config, iface),
+                )
             )
 
     # Build flat models array and derive public model hub entries from provider/model defaults
