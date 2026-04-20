@@ -2,7 +2,7 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://example.com/litellm-config.schema.json",
     "title": "LiteLLM Config Schema",
-    "description": "Configuration schema for LiteLLM proxy management script",
+    "description": "Configuration schema for LiteLLM-X-Server-Config management script",
     "type": "object",
     "properties": {
         "$schema": {
@@ -70,7 +70,10 @@
             "description": "Provider configuration",
             "properties": {
                 "$extend": {
-                    "type": ["string", "null"],
+                    "type": [
+                        "string",
+                        "null"
+                    ],
                     "description": "Inherit configuration from another provider. Set to null to remove inheritance."
                 },
                 "api_key": {

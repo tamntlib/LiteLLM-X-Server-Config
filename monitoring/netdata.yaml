@@ -1,4 +1,4 @@
-# Netdata Monitoring Stack for LLM Proxy
+# Netdata Monitoring Stack for LiteLLM-X-Server-Config
 # Deploy: ptctools docker stack deploy -u $PORTAINER_URL -n monitoring -f 'netdata.yaml'
 
 volumes:

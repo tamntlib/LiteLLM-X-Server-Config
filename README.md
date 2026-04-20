@@ -1,4 +1,4 @@
-# LLM Proxy
+# LiteLLM-X-Server-Config
 
 A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, and Netdata. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer.
 
@@ -7,17 +7,21 @@ A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/
 This repository is deployed as multiple Docker Swarm stacks:
 
 ### Application data stack (`llmproxy-data.yaml`)
+
 - `db`: PostgreSQL database for LiteLLM state, usage logs, and model configuration
 
 ### Application stack (`llmproxy.yaml`)
+
 - `cli-proxy-api`: Anthropic-compatible proxy and auth service
 - `litellm`: Core routing layer and LiteLLM admin UI
 
 ### Monitoring stack (`monitoring/netdata.yaml`)
+
 - `netdata`: Host and container monitoring dashboard
 - `config-generator`: Sidecar that watches Docker labels and generates Netdata collector configs
 
 ### Networks
+
 - `internal`: private overlay network between application services and PostgreSQL
 - `public`: external Traefik network for HTTPS routing
 - `monitoring`: shared overlay network used by Netdata auto-discovery
@@ -77,6 +81,7 @@ cp monitoring/.env.example monitoring/.env
 ```
 
 Required environment variables:
+
 - `NETDATA_HOST`: Hostname for the Netdata dashboard
 - `NETDATA_BASIC_AUTH`: Basic auth credentials for Traefik
 
@@ -106,11 +111,13 @@ cp .env.example .env
 ```
 
 Required environment variables:
+
 - `DB_USER`, `DB_PASSWORD`, `DB_NAME`: PostgreSQL credentials
 - `LITELLM_HOST`, `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`: LiteLLM configuration
 - `CLI_PROXY_API_HOST`: CLIProxyAPI hostname
 
 Optional environment variables used by the stack:
+
 - `CLAUDE_CODE_MODELS`: Comma-separated model names that should enforce Claude Code checks
 - `CLAUDE_CODE_MIN_VERSION`: Minimum allowed Claude Code version for those models
 - `SLACK_WEBHOOK_URL`: LiteLLM Slack webhook
@@ -151,6 +158,7 @@ python3 create_api_key.py user@example.com --alias my-key
 ```
 
 Required environment variables in `litellm_scripts/.env`:
+
 - `LITELLM_API_KEY`
 - `LITELLM_BASE_URL`
 
