@@ -6,32 +6,18 @@
                 "General"
             ],
             "api_base": "http://cli-proxy-api:8317",
+            "is_public_model_hub": true,
             "interfaces": {
-                "anthropic": {
-                    "models": {
-                        "gpt-5-codex-mini": {
-                            "ignored": true
-                        }
-                    }
-                },
-                "openai": {
-                    "models": {
-                        "gpt-5.4": {
-                            "model_name": "openai/gpt-5.4",
-                            "model_info": {
-                                "base_model": "gpt-5.4"
-                            }
-                        }
-                    },
-                    "models_autofill_disabled": true
-                }
+                "anthropic": {},
+                "openai": {}
             }
         },
-        "alibabacloud": {
+        "alibabacloud-anthropic": {
             "access_groups": [
                 "General"
             ],
             "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+            "is_public_model_hub": true,
             "interfaces": {
                 "anthropic": {
                     "models": {
@@ -47,8 +33,31 @@
                     "models_autofill_disabled": true
                 }
             }
+        },
+        "alibabacloud-openai": {
+            "access_groups": [
+                "General"
+            ],
+            "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
+            "is_public_model_hub": true,
+            "interfaces": {
+                "openai": {
+                    "models": {
+                        "qwen3.5-plus": {},
+                        "qwen3-max-2026-01-23": {},
+                        "qwen3-coder-next": {},
+                        "qwen3-coder-plus": {},
+                        "glm-5": {},
+                        "glm-4.7": {},
+                        "kimi-k2.5": {},
+                        "MiniMax-M2.5": {}
+                    },
+                    "models_autofill_disabled": true
+                }
+            }
         }
     },
+    "public_model_hub": [],
     "model_name_base_model_map": {
         "gpt-5.3-codex-spark": "chatgpt/gpt-5.3-codex-spark",
         "qwen3.5-plus": "dashscope/qwen3.5-plus",
@@ -61,10 +70,15 @@
         "MiniMax-M2.5": "minimax/MiniMax-M2.5"
     },
     "aliases": {
-        "claude-opus-4-7": "gpt-5.4",
-        "claude-opus-4-6": "gpt-5.4",
-        "claude-sonnet-4-6": "gpt-5.4",
-        "claude-haiku-4-5-20251001": "gpt-5.4"
+        "claude-opus-4-7": "anthropic/gpt-5.4",
+        "claude-opus-4-6": "anthropic/gpt-5.4",
+        "claude-sonnet-4-6": "anthropic/gpt-5.4",
+        "claude-haiku-4-5-20251001": "anthropic/gpt-5.4",
+        "gpt-5.4": "openai/gpt-5.4",
+        "gpt-5.4-mini": "openai/gpt-5.4-mini",
+        "gpt-5.2": "openai/gpt-5.2",
+        "gpt-5.3-codex": "openai/gpt-5.3-codex",
+        "gpt-5.3-codex-spark": "openai/gpt-5.3-codex-spark"
     },
     "fallbacks": [
         {

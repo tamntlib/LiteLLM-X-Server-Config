@@ -40,6 +40,21 @@
                 }
             }
         },
+        "public_model_hub": {
+            "type": "array",
+            "description": "List of model group names or aliases to expose in LiteLLM public model hub",
+            "items": {
+                "type": "string"
+            }
+        },
+        "public_model_hub_autofill_disabled": {
+            "type": "boolean",
+            "description": "Disable autofilling public_model_hub from derived model defaults"
+        },
+        "public_model_hub_aliases_autofill_disabled": {
+            "type": "boolean",
+            "description": "Disable autofilling public_model_hub from aliases"
+        },
         "model_name_base_model_map": {
             "type": "object",
             "description": "Global mapping of model names to base_model identifiers. Used as fallback when a model does not specify its own base_model.",
@@ -77,6 +92,10 @@
                     },
                     "description": "Access groups for model visibility"
                 },
+                "is_public_model_hub": {
+                    "type": "boolean",
+                    "description": "Default public model hub visibility for all models under this provider"
+                },
                 "interfaces": {
                     "type": "object",
                     "description": "Provider interfaces (openai, gemini, anthropic)",
@@ -103,6 +122,10 @@
                 "models_autofill_disabled": {
                     "type": "boolean",
                     "description": "Set to true to disable auto-fetching models from the provider's API. Autofill is enabled by default."
+                },
+                "model_name_prefix": {
+                    "type": "string",
+                    "description": "Prefix for derived model group names on this interface. Defaults to the interface name when omitted."
                 },
                 "models": {
                     "type": "object",
@@ -134,6 +157,10 @@
                                 "type": "string"
                             },
                             "description": "Access groups for this model (overrides provider-level access_groups)"
+                        },
+                        "is_public_model_hub": {
+                            "type": "boolean",
+                            "description": "Whether this model should be exposed in LiteLLM's public model hub (overrides provider-level default)"
                         },
                         "model_info": {
                             "type": "object",

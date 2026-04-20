@@ -291,27 +291,30 @@ def sort_model_payloads(model_payloads: list[dict]) -> list[dict]:
     )
 
 
-def resolve_provider_models(providers: dict, base_model_map: dict = None) -> list:
-    """Resolve providers into a flat list of LiteLLM model request bodies.
+def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tuple[list, list]:
+    """Resolve providers into model payloads and derived public model hub entries.
 
     For each provider, for each interface, for each model:
     1. Use interface-specific `models` from providers.<provider>.interfaces.<interface>.models
     2. If `models` is empty, auto-fetch from the provider's /models API endpoint
     3. Resolve base_model: explicit > model_name_base_model_map > model_name
     4. Resolve access_groups (model-level overrides provider-level)
-    5. Build the full model_name, litellm_params, and model_info
+    5. Resolve public model hub visibility (model-level overrides provider-level)
+    6. Build the full model_name, litellm_params, and model_info
 
     Args:
         providers: Resolved provider configurations
         base_model_map: Global model_name -> base_model mapping (fallback)
 
-    Returns a list of dicts ready to POST to LiteLLM's /model/new endpoint.
+    Returns a tuple of (model payloads, derived public model hub entries).
     """
     models = []
+    public_model_hub = []
     base_model_map = base_model_map or {}
 
     for service_name, provider_config in providers.items():
         provider_access_groups = provider_config.get("access_groups")
+        provider_is_public_model_hub = provider_config.get("is_public_model_hub", False)
         api_key = provider_config.get("api_key")
         api_base = provider_config.get("api_base", "")
         models_api_base = provider_config.get("models_api_base") or api_base
@@ -325,6 +328,7 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> lis
             iface = iface_config if iface_config else {}
             iface_models = iface.get("models", {})
             autofill_disabled = iface.get("models_autofill_disabled", False)
+            model_name_prefix = iface.get("model_name_prefix", provider)
 
             # Auto-discover models from API unless autofill is disabled
             if not autofill_disabled and models_api_base:
@@ -364,16 +368,24 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> lis
                     base_model = model_info_cfg.get("base_model")
                     litellm_params_cfg = model_cfg.get("litellm_params", {})
                     access_groups = model_cfg.get("access_groups")
+                    is_public_model_hub = model_cfg.get("is_public_model_hub")
                 else:
                     model_group_name = None
                     model_info_cfg = {}
                     base_model = None
                     litellm_params_cfg = {}
                     access_groups = None
+                    is_public_model_hub = None
 
-                model_name = model_group_name or litellm_model_name
-                # Resolve base_model: explicit > map lookup > model_name
-                base_model = base_model or base_model_map.get(model_name) or model_name
+                derived_model_name = f"{model_name_prefix}/{litellm_model_name}"
+                model_name = model_group_name or derived_model_name
+                # Resolve base_model: explicit > raw-name map lookup > model-name map lookup > raw model name
+                base_model = (
+                    base_model
+                    or base_model_map.get(litellm_model_name)
+                    or base_model_map.get(model_name)
+                    or litellm_model_name
+                )
 
                 # Resolve access_groups: model-level > model_info-level > provider-level
                 resolved_access_groups = (
@@ -388,6 +400,12 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> lis
                     model_info["base_model"] = base_model
                 if resolved_access_groups:
                     model_info["access_groups"] = resolved_access_groups
+
+                resolved_is_public_model_hub = (
+                    is_public_model_hub
+                    if is_public_model_hub is not None
+                    else provider_is_public_model_hub
+                )
 
                 # Build litellm_params
                 litellm_params = dict(litellm_params_cfg)
@@ -406,7 +424,10 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> lis
                     }
                 )
 
-    return models
+                if resolved_is_public_model_hub:
+                    public_model_hub.append(model_name)
+
+    return models, public_model_hub
 
 
 def generate_config(config_path: Path) -> dict:
@@ -422,6 +443,7 @@ def generate_config(config_path: Path) -> dict:
     - credentials: list of credential definitions
     - aliases: model alias mappings
     - fallbacks: fallback rules
+    - public_model_hub: derived model groups plus explicit aliases to expose in the public model hub
     """
     config, base_config = load_config_with_local(config_path)
 
@@ -444,9 +466,10 @@ def generate_config(config_path: Path) -> dict:
                 }
             )
 
-    # Build flat models array
+    # Build flat models array and derive public model hub entries from provider/model defaults
     base_model_map = config.get("model_name_base_model_map", {})
-    models = sort_model_payloads(resolve_provider_models(providers, base_model_map))
+    models, derived_public_model_hub = resolve_provider_models(providers, base_model_map)
+    models = sort_model_payloads(models)
 
     # Resolve $base references in fallbacks
     fallbacks = resolve_fallback_base_refs(
@@ -455,11 +478,25 @@ def generate_config(config_path: Path) -> dict:
     )
 
     aliases = config.get("aliases", {})
+    public_model_hub_autofill_disabled = config.get(
+        "public_model_hub_autofill_disabled", False
+    )
+    public_model_hub_aliases_autofill_disabled = config.get(
+        "public_model_hub_aliases_autofill_disabled", False
+    )
 
-    # Validate aliases and fallbacks against known models
+    public_model_hub = []
+    if not public_model_hub_autofill_disabled:
+        public_model_hub.extend(derived_public_model_hub)
+    if not public_model_hub_aliases_autofill_disabled:
+        public_model_hub.extend(aliases.keys())
+    public_model_hub.extend(config.get("public_model_hub", []))
+
+    # Validate aliases, fallbacks, and public model hub entries against known models
     model_names = {m["model_name"] for m in models}
     validate_aliases(aliases, model_names)
     validate_fallbacks(fallbacks, model_names, aliases)
+    validate_public_model_hub(public_model_hub, model_names, aliases)
     validate_prices(models)
 
     return {
@@ -467,6 +504,7 @@ def generate_config(config_path: Path) -> dict:
         "models": models,
         "aliases": aliases,
         "fallbacks": fallbacks,
+        "public_model_hub": public_model_hub,
     }
 
 
@@ -495,6 +533,29 @@ def validate_fallbacks(fallbacks: list, model_names: set, aliases: dict):
                         f"⚠️ Fallback target '{target}' for '{source}' "
                         f"is not a known model or alias"
                     )
+
+
+def validate_public_model_hub(public_model_hub: list, model_names: set, aliases: dict):
+    """Validate that public model hub entries reference existing models or aliases."""
+    valid_targets = model_names | set(aliases.keys())
+    seen = set()
+    duplicates = set()
+
+    for entry in public_model_hub:
+        if entry in seen:
+            duplicates.add(entry)
+        else:
+            seen.add(entry)
+
+        if entry not in valid_targets:
+            logger.warning(
+                f"⚠️ Public model hub entry '{entry}' is not a known model or alias"
+            )
+
+    if duplicates:
+        logger.warning(
+            f"⚠️ Duplicate public model hub entries found: {sorted(duplicates)}"
+        )
 
 
 _litellm_prices_cache = None

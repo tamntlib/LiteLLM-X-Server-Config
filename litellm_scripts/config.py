@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Unified LiteLLM management script for credentials, models, aliases, and fallbacks.
+Unified LiteLLM management script for credentials, models, aliases, fallbacks, and public model hub.
 
 Configuration:
-    - config.json: Base configuration (providers, models, aliases, fallbacks)
+    - config.json: Base configuration (providers, models, aliases, fallbacks, public_model_hub)
     - config.local.json: Local overrides (extends/overrides config.json)
       Include api_key in provider config for credentials:
       {
@@ -15,7 +15,7 @@ Configuration:
       }
 
 Usage:
-    python3 config.py --only credentials,models,aliases,fallbacks --force --prune
+    python3 config.py --only credentials,models,aliases,fallbacks,public_model_hub --force --prune
 """
 
 import asyncio
@@ -30,7 +30,12 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from load_dotenv import load_dotenv
 
-from gen_config import generate_config, validate_aliases, validate_fallbacks
+from gen_config import (
+    generate_config,
+    validate_aliases,
+    validate_fallbacks,
+    validate_public_model_hub,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -416,6 +421,60 @@ def update_fallbacks(fallbacks: list, force=False):
 
 
 # ============================================================================
+# Public Model Hub Management
+# ============================================================================
+
+
+def _normalize_public_model_hub(model_groups: list) -> list:
+    normalized = []
+    seen = set()
+    for model_group in model_groups:
+        if model_group not in seen:
+            normalized.append(model_group)
+            seen.add(model_group)
+    return normalized
+
+
+def get_current_public_model_hub():
+    success, result = get_request("public/model_hub")
+    if not success or not isinstance(result, list):
+        return []
+
+    model_groups = []
+    for item in result:
+        if isinstance(item, dict) and item.get("model_group"):
+            model_groups.append(item["model_group"])
+    return _normalize_public_model_hub(model_groups)
+
+
+def update_public_model_hub(model_groups: list, force=False):
+    desired_model_groups = _normalize_public_model_hub(model_groups)
+    current_model_groups = get_current_public_model_hub()
+
+    if not force and current_model_groups == desired_model_groups:
+        logger.info("Public model hub already up-to-date, skipping")
+        return True, "skipped"
+
+    success, result = post_request(
+        "model_group/make_public", {"model_groups": desired_model_groups}
+    )
+
+    if success:
+        logger.info(
+            f"✅ Updated public model hub with {len(desired_model_groups)} entries"
+        )
+        existing_models = {model["model_name"] for model in get_all_models()}
+        current_aliases = get_current_aliases()
+        validate_public_model_hub(
+            desired_model_groups, existing_models, current_aliases
+        )
+    else:
+        logger.error(f"❌ Failed to update public model hub: {result}")
+
+    return success, result
+
+
+# ============================================================================
 # Main Sync Functions
 # ============================================================================
 
@@ -575,6 +634,15 @@ def sync_fallbacks(config: dict, force=False):
     update_fallbacks(fallbacks, force)
 
 
+def sync_public_model_hub(config: dict, force=False):
+    logger.info("=" * 60)
+    logger.info("Syncing public model hub...")
+    logger.info("=" * 60)
+
+    public_model_hub = config.get("public_model_hub", [])
+    update_public_model_hub(public_model_hub, force)
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -585,8 +653,8 @@ async def main():
     parser.add_argument(
         "--only",
         type=str,
-        default="credentials,models,aliases,fallbacks",
-        help="Comma-separated list of components to sync (credentials,models,aliases,fallbacks)",
+        default="credentials,models,aliases,fallbacks,public_model_hub",
+        help="Comma-separated list of components to sync (credentials,models,aliases,fallbacks,public_model_hub)",
     )
     parser.add_argument(
         "--force",
@@ -613,7 +681,13 @@ async def main():
     args = parser.parse_args()
 
     components = [c.strip() for c in args.only.split(",")]
-    valid_components = {"credentials", "models", "aliases", "fallbacks"}
+    valid_components = {
+        "credentials",
+        "models",
+        "aliases",
+        "fallbacks",
+        "public_model_hub",
+    }
     invalid = set(components) - valid_components
     if invalid:
         logger.error(f"Invalid components: {invalid}. Valid: {valid_components}")
@@ -647,6 +721,9 @@ async def main():
 
     if "fallbacks" in components:
         sync_fallbacks(config, args.force)
+
+    if "public_model_hub" in components:
+        sync_public_model_hub(config, args.force)
 
     logger.info("=" * 60)
     logger.info("✅ Sync complete!")

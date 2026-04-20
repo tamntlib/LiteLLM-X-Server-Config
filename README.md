@@ -137,12 +137,13 @@ cd litellm_scripts
 # Generate a resolved config from config.json + config.local.json
 python3 gen_config.py
 
-# Full sync of credentials, models, aliases, and fallbacks
-python3 config.py --only credentials,models,aliases,fallbacks --force --prune
+# Full sync of credentials, models, aliases, fallbacks, and public model hub
+python3 config.py --only credentials,models,aliases,fallbacks,public_model_hub --force --prune
 
 # Sync specific components
 python3 config.py --only models --force
-python3 config.py --only aliases,fallbacks
+python3 config.py --only aliases,fallbacks,public_model_hub
+python3 config.py --only public_model_hub
 
 # Create a LiteLLM user and API key
 python3 create_api_key.py user@example.com
@@ -163,7 +164,7 @@ Required environment variables in `litellm_scripts/.env`:
 | `configs/litellm.yaml` | LiteLLM runtime config (callbacks, DB batching, connection pool settings) |
 | `configs/cli-proxy-api.yaml` | CLIProxyAPI runtime config |
 | `configs/claude_code_hook.py` | LiteLLM callback that enforces Claude Code User-Agent and minimum version rules |
-| `litellm_scripts/config.json` | Base provider/model/alias/fallback config |
+| `litellm_scripts/config.json` | Base provider/model/alias/fallback/public-model-hub config |
 | `litellm_scripts/config.local.json` | Local overrides including API keys (gitignored, deep-merged with `config.json`) |
 | `litellm_scripts/config.gen.json` | Generated resolved config output from `gen_config.py` |
 | `.env` | Environment variables for the application stacks |
@@ -187,6 +188,73 @@ Create `litellm_scripts/config.local.json` to add API keys and local overrides:
 ```
 
 This file is deep-merged with `config.json`, so you only need to specify overrides. Provider configs can also use `$extend` in `config.json` and override or disable inheritance in `config.local.json`.
+
+### `public_model_hub` and `is_public_model_hub`
+
+Use `public_model_hub` to add explicit model groups or aliases to LiteLLM's public model hub:
+
+```json
+{
+  "public_model_hub": [
+    "claude-opus-4-7"
+  ]
+}
+```
+
+Use `is_public_model_hub` to derive public model hub entries from config defaults:
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "is_public_model_hub": true,
+      "interfaces": {
+        "openai": {
+          "models": {
+            "model-a": null,
+            "model-b": {
+              "is_public_model_hub": false
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- provider-level `is_public_model_hub` is the default for all models under that provider
+- model-level `is_public_model_hub` overrides the provider default
+- if `is_public_model_hub` is omitted, it is treated as `false`
+- `public_model_hub` entries are combined from three sources by default: derived model entries, alias names, and the explicit `public_model_hub` array
+- set `public_model_hub_autofill_disabled: true` to disable derived model entry autofill
+- set `public_model_hub_aliases_autofill_disabled: true` to disable alias-name autofill
+- in `config.local.json`, the `public_model_hub` array replaces the base list instead of merging element-by-element
+
+### `model_name_prefix`
+
+Each interface may define `model_name_prefix` to control derived model group names. When omitted, it defaults to the interface name.
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "interfaces": {
+        "anthropic": {
+          "model_name_prefix": "anthropic",
+          "models": {
+            "claude-sonnet-4-6": null
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+With no explicit `model_name`, the generated model group name becomes `<model_name_prefix>/<model-id>`. If `model_name` is set on a model, it still wins.
 
 ### Model-level `access_groups`
 
