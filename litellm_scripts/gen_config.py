@@ -13,11 +13,11 @@ Usage:
 
 import json
 import logging
-import urllib.request
 import urllib.error
 import argparse
 import re
 from pathlib import Path
+from http_utils import format_http_error, request_json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -225,11 +225,11 @@ def _fetch_openai_models(api_base: str, api_key: str) -> list[str]:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    req = urllib.request.Request(url, headers=headers)
-
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            data = json.loads(res.read().decode())
+        data = request_json(url, headers=headers, timeout=30)
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Failed to fetch models from {url}: {format_http_error(e)}")
+        return []
     except Exception as e:
         logger.warning(f"Failed to fetch models from {url}: {e}")
         return []
@@ -247,11 +247,11 @@ def _fetch_gemini_models(api_base: str, api_key: str) -> list[str]:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    req = urllib.request.Request(url, headers=headers)
-
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            data = json.loads(res.read().decode())
+        data = request_json(url, headers=headers, timeout=30)
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Failed to fetch models from {url}: {format_http_error(e)}")
+        return []
     except Exception as e:
         logger.warning(f"Failed to fetch models from {url}: {e}")
         return []
@@ -314,10 +314,11 @@ def _fetch_anthropic_models(api_base: str, api_key: str) -> list[str]:
     url = base_url
 
     while True:
-        req = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=30) as res:
-                data = json.loads(res.read().decode())
+            data = request_json(url, headers=headers, timeout=30)
+        except urllib.error.HTTPError as e:
+            logger.warning(f"Failed to fetch models from {url}: {format_http_error(e)}")
+            break
         except Exception as e:
             logger.warning(f"Failed to fetch models from {url}: {e}")
             break
@@ -644,9 +645,13 @@ def _get_litellm_prices() -> dict:
         return _litellm_prices_cache
 
     try:
-        req = urllib.request.Request(LITELLM_PRICES_URL)
-        with urllib.request.urlopen(req, timeout=30) as res:
-            _litellm_prices_cache = json.loads(res.read().decode())
+        _litellm_prices_cache = request_json(LITELLM_PRICES_URL, timeout=30)
+    except urllib.error.HTTPError as e:
+        logger.warning(
+            f"Failed to fetch LiteLLM pricing data from {LITELLM_PRICES_URL}: "
+            f"{format_http_error(e)}"
+        )
+        _litellm_prices_cache = {}
     except Exception as e:
         logger.warning(f"Failed to fetch LiteLLM pricing data: {e}")
         _litellm_prices_cache = {}

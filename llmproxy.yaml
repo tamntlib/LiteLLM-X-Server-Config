@@ -55,7 +55,8 @@ services:
       labels:
         - traefik.enable=true
         - traefik.http.routers.cli-proxy-api.rule=Host(`${CLI_PROXY_API_HOST}`)
-        - traefik.http.routers.cli-proxy-api.entrypoints=websecure
+        - traefik.http.routers.cli-proxy-api.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}
+        - traefik.http.routers.cli-proxy-api.tls=${TRAEFIK_ROUTER_TLS:-false}
         - traefik.http.routers.cli-proxy-api.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
         - traefik.http.services.cli-proxy-api.loadbalancer.server.port=8317
         - traefik.http.routers.cli-proxy-api.service=cli-proxy-api
@@ -99,7 +100,8 @@ services:
       labels:
         - traefik.enable=true
         - traefik.http.routers.litellm.rule=Host(`${LITELLM_HOST}`)
-        - traefik.http.routers.litellm.entrypoints=websecure
+        - traefik.http.routers.litellm.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}
+        - traefik.http.routers.litellm.tls=${TRAEFIK_ROUTER_TLS:-false}
         - traefik.http.routers.litellm.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
         - traefik.http.services.litellm.loadbalancer.server.port=4000
         - traefik.http.routers.litellm.service=litellm

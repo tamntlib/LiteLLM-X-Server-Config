@@ -28,6 +28,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from http_utils import build_request, format_http_error, request_json
 from load_dotenv import load_dotenv
 
 from gen_config import (
@@ -59,15 +60,16 @@ DEFAULT_CONFIG_FILE = "config.json"
 def get_actor_from_key():
     url = f"{LITELLM_BASE_URL}/key/info"
     headers = {"Authorization": "Bearer " + LITELLM_API_KEY}
-    req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req) as res:
-            data = json.loads(res.read().decode())
-            return (
-                data.get("info", {}).get("user_id")
-                or data.get("info", {}).get("team_id")
-                or LITELLM_API_KEY[:20]
-            )
+        data = request_json(url, headers=headers)
+        return (
+            data.get("info", {}).get("user_id")
+            or data.get("info", {}).get("team_id")
+            or LITELLM_API_KEY[:20]
+        )
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Failed to get actor from key: {format_http_error(e)}")
+        return LITELLM_API_KEY[:20]
     except Exception as e:
         logger.warning(f"Failed to get actor from key: {e}")
         return LITELLM_API_KEY[:20]
@@ -81,10 +83,10 @@ def get_actor_from_key():
 def get_request(endpoint):
     url = f"{LITELLM_BASE_URL}/{endpoint}"
     headers = {"Authorization": "Bearer " + LITELLM_API_KEY}
-    req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req) as res:
-            return True, json.loads(res.read().decode())
+        return True, request_json(url, headers=headers)
+    except urllib.error.HTTPError as e:
+        return False, format_http_error(e)
     except Exception as e:
         return False, str(e)
 
@@ -95,10 +97,12 @@ def post_request(endpoint, data):
         "Authorization": "Bearer " + LITELLM_API_KEY,
         "Content-Type": "application/json",
     }
-    req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers)
+    req = build_request(url, data=json.dumps(data).encode(), headers=headers)
     try:
         with urllib.request.urlopen(req) as res:
             return True, res.read().decode()
+    except urllib.error.HTTPError as e:
+        return False, format_http_error(e)
     except Exception as e:
         return False, str(e)
 
@@ -106,10 +110,12 @@ def post_request(endpoint, data):
 def delete_request(endpoint):
     url = f"{LITELLM_BASE_URL}/{endpoint}"
     headers = {"Authorization": "Bearer " + LITELLM_API_KEY}
-    req = urllib.request.Request(url, headers=headers, method="DELETE")
+    req = build_request(url, headers=headers, method="DELETE")
     try:
         with urllib.request.urlopen(req) as res:
             return True, res.read().decode()
+    except urllib.error.HTTPError as e:
+        return False, format_http_error(e)
     except Exception as e:
         return False, str(e)
 

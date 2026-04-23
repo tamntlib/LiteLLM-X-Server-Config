@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import argparse
-import urllib.request
 import urllib.parse
 import urllib.error
 import json
 import os
 import sys
+from http_utils import format_http_error, request_json
 from load_dotenv import load_dotenv
 
 
@@ -20,23 +20,24 @@ def get_user_by_email(email):
     """Get user by email. Returns user data or None if not found."""
     # user_email is a partial match filter, so we need to check exact match
     url = f"{LITELLM_BASE_URL}/user/list?user_email={urllib.parse.quote(email)}&page=1&page_size=100"
-    req = urllib.request.Request(url, method="GET")
-    req.add_header("Authorization", f"Bearer {LITELLM_API_KEY}")
-    req.add_header("Accept", "application/json")
-
     try:
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            users = data.get("users", [])
-            for user in users:
-                if user.get("user_email") == email:
-                    return user
-            return None
+        data = request_json(
+            url,
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {LITELLM_API_KEY}",
+                "Accept": "application/json",
+            },
+        )
+        users = data.get("users", [])
+        for user in users:
+            if user.get("user_email") == email:
+                return user
+        return None
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
-        error_body = e.read().decode("utf-8")
-        print(f"⚠️ Error checking user: {e.code}: {error_body}", file=sys.stderr)
+        print(f"⚠️ Error checking user: {format_http_error(e)}", file=sys.stderr)
         return None
     except Exception as e:
         print(f"⚠️ Error checking user: {e}", file=sys.stderr)
@@ -55,19 +56,19 @@ def create_user(email):
 
     data = json.dumps(payload).encode("utf-8")
 
-    req = urllib.request.Request(
-        f"{LITELLM_BASE_URL}/user/new", data=data, method="POST"
-    )
-    req.add_header("Authorization", f"Bearer {LITELLM_API_KEY}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "*/*")
-
     try:
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return request_json(
+            f"{LITELLM_BASE_URL}/user/new",
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {LITELLM_API_KEY}",
+                "Content-Type": "application/json",
+                "Accept": "*/*",
+            },
+        )
     except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        print(f"❌ Failed to create user: {e.code}: {error_body}", file=sys.stderr)
+        print(f"❌ Failed to create user: {format_http_error(e)}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -87,19 +88,19 @@ def create_api_key(user_id, key_alias, key_value=None):
 
     data = json.dumps(payload).encode("utf-8")
 
-    req = urllib.request.Request(
-        f"{LITELLM_BASE_URL}/key/generate", data=data, method="POST"
-    )
-    req.add_header("Authorization", f"Bearer {LITELLM_API_KEY}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "*/*")
-
     try:
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return request_json(
+            f"{LITELLM_BASE_URL}/key/generate",
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {LITELLM_API_KEY}",
+                "Content-Type": "application/json",
+                "Accept": "*/*",
+            },
+        )
     except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        print(f"❌ Failed to create API key: {e.code}: {error_body}", file=sys.stderr)
+        print(f"❌ Failed to create API key: {format_http_error(e)}", file=sys.stderr)
         sys.exit(1)
 
 

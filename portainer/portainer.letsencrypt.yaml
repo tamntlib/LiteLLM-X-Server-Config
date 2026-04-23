@@ -1,0 +1,22 @@
+services:
+  traefik:
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --providers.swarm=true
+      - --providers.swarm.exposedbydefault=false
+      - --providers.swarm.network=public
+      - --api.dashboard=true
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.httpchallenge=true
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.httpchallenge.entrypoint=web
+      - --log.level=ERROR
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik-letsencrypt-data:/letsencrypt"
+
+volumes:
+  traefik-letsencrypt-data:

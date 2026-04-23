@@ -1,10 +1,17 @@
 # LiteLLM-X-Server-Config
 
-A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, and Netdata. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer.
+A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, Netdata, Traefik, and optional Cloudflare Tunnel. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer.
 
 ## Architecture
 
 This repository is deployed as multiple Docker Swarm stacks:
+
+### Infrastructure stack (`portainer/portainer.yaml`)
+
+- `traefik`: Shared ingress proxy for Portainer, LiteLLM, CLIProxyAPI, and Netdata
+- `cloudflared`: Optional Cloudflare Tunnel connector that forwards public hostnames to Traefik
+- `portainer`: Docker Swarm management UI
+- `agent`: Portainer agent for Swarm node access
 
 ### Application data stack (`llmproxy-data.yaml`)
 
@@ -23,8 +30,25 @@ This repository is deployed as multiple Docker Swarm stacks:
 ### Networks
 
 - `internal`: private overlay network between application services and PostgreSQL
-- `public`: external Traefik network for HTTPS routing
+- `public`: shared overlay network for Traefik, optional `cloudflared`, and routed services
 - `monitoring`: shared overlay network used by Netdata auto-discovery
+
+## Routing modes
+
+The stacks support two ingress modes:
+
+- Default: Cloudflare Tunnel forwards requests to Traefik on `http://traefik:80`, so Let's Encrypt is not required.
+- Optional: Traefik can terminate HTTPS itself with Let's Encrypt by deploying `portainer/portainer.letsencrypt.yaml` and switching router env vars from `web`/`false` to `websecure`/`true`.
+
+### Shared routing variables
+
+Use the same routing variables in [portainer/.env.example](/Users/tamnt/My-Projects/LiteLLM-X-Server-Config/portainer/.env.example), [monitoring/.env.example](/Users/tamnt/My-Projects/LiteLLM-X-Server-Config/monitoring/.env.example), and [.env.example](/Users/tamnt/My-Projects/LiteLLM-X-Server-Config/.env.example):
+
+| Variable | Default | When to change it |
+|------|------|-------------|
+| `TRAEFIK_ROUTER_ENTRYPOINTS` | `web` | Set to `websecure` when Traefik terminates HTTPS |
+| `TRAEFIK_ROUTER_TLS` | `false` | Set to `true` when Traefik terminates HTTPS |
+| `LETSENCRYPT_RESOLVER` | `le` | Change only if you use a different Traefik resolver name |
 
 ## Prerequisites
 
@@ -35,18 +59,31 @@ uv tool install ptctools --from git+https://github.com/tamntlib/ptctools.git
 
 ## Installation
 
-### 1. Install Portainer CE with Docker Swarm
+### 1. Install Portainer CE, Traefik, and optional Cloudflare Tunnel
 
-#### Set DNS records for Portainer
+#### Choose how hostnames reach Traefik
 
-Add the following record to your DNS:
+Default Cloudflare Tunnel flow:
 
-- `portainer.example.com`
+- Create a remotely managed tunnel in Cloudflare Zero Trust.
+- Add public hostnames such as `portainer.example.com`, `netdata.example.com`, `llm.example.com`, and `cli-proxy-api.llm.example.com`.
+- Point each public hostname at `http://traefik:80`.
 
-#### Copy file `portainer.yaml` to server
+Optional direct HTTPS with Let's Encrypt:
+
+- Create DNS `A`/`AAAA` records for the same hostnames and point them to your server IP.
+
+#### Create the Portainer config directory on the server
 
 ```sh
-scp portainer/portainer.yaml root@<ip>:/root/portainer.yaml
+ssh root@<ip> 'mkdir -p /opt/portainer'
+```
+
+#### Copy the Portainer stack files to the server
+
+```sh
+scp portainer/portainer.yaml portainer/portainer.letsencrypt.yaml root@<ip>:/opt/portainer/
+scp portainer/.env.example root@<ip>:/opt/portainer/.env
 ```
 
 #### SSH to server
@@ -55,22 +92,45 @@ scp portainer/portainer.yaml root@<ip>:/root/portainer.yaml
 
 <https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository>
 
-##### Install Portainer CE with Docker Swarm
+##### Configure the Portainer stack
 
 ```sh
 docker swarm init
-LETSENCRYPT_EMAIL=<email> PORTAINER_HOST=<host> docker stack deploy -c /root/portainer.yaml portainer
+```
+
+Edit `/opt/portainer/.env` and set at least:
+
+- `PORTAINER_HOST`
+- `CLOUDFLARE_TUNNEL_REPLICAS=1` and `CLOUDFLARE_TUNNEL_TOKEN=<token>` if you want the built-in `cloudflared` service enabled
+- the shared routing variables from `Routing modes` if you want values other than the defaults
+
+##### Deploy Portainer with the default non-Let's Encrypt setup
+
+```sh
+docker stack deploy -c /opt/portainer/portainer.yaml portainer
+```
+
+##### Optional: enable Let's Encrypt on Traefik
+
+If you want Traefik to terminate HTTPS itself:
+
+1. Set `TRAEFIK_ROUTER_ENTRYPOINTS=websecure` and `TRAEFIK_ROUTER_TLS=true` in `/opt/portainer/.env`.
+2. Set `LETSENCRYPT_EMAIL=<email>` in `/opt/portainer/.env`.
+3. Set the same `TRAEFIK_ROUTER_ENTRYPOINTS=websecure` and `TRAEFIK_ROUTER_TLS=true` values in `monitoring/.env` and `.env` before deploying those stacks.
+4. Deploy with the override file:
+
+```sh
+docker stack deploy -c /opt/portainer/portainer.yaml -c /opt/portainer/portainer.letsencrypt.yaml portainer
 ```
 
 ### 2. Deploy the monitoring stack
 
 Deploy this first so the shared `monitoring` overlay network exists before the application stacks join it.
 
-#### Set DNS records
+#### Expose the Netdata hostname
 
-Add the following record to your DNS:
-
-- `netdata.example.com`
+- Cloudflare Tunnel: add `netdata.example.com` as a public hostname to `http://traefik:80`
+- Direct Let's Encrypt: add `netdata.example.com` as a DNS record to your server IP
 
 #### Set environment variables
 
@@ -85,6 +145,8 @@ Required environment variables:
 - `NETDATA_HOST`: Hostname for the Netdata dashboard
 - `NETDATA_BASIC_AUTH`: Basic auth credentials for Traefik
 
+If you use Traefik-managed HTTPS, also set the shared routing variables from `Routing modes`.
+
 #### Create configs and deploy
 
 ```sh
@@ -95,12 +157,10 @@ ptctools docker stack deploy -n monitoring -f 'monitoring/netdata.yaml' --owners
 
 ### 3. Deploy the application stacks from your local machine
 
-#### Set DNS records
+#### Expose the application hostnames
 
-Add the following records to your DNS:
-
-- `llm.example.com` (LiteLLM)
-- `cli-proxy-api.llm.example.com` (CLIProxyAPI)
+- Cloudflare Tunnel: add `llm.example.com` and `cli-proxy-api.llm.example.com` as public hostnames to `http://traefik:80`
+- Direct Let's Encrypt: add the same hostnames as DNS records to your server IP
 
 #### Set environment variables
 
@@ -118,6 +178,7 @@ Required environment variables:
 
 Optional environment variables used by the stack:
 
+- the shared routing variables from `Routing modes` when using Traefik-managed HTTPS
 - `CLAUDE_CODE_MODELS`: Comma-separated model names that should enforce Claude Code checks
 - `CLAUDE_CODE_MIN_VERSION`: Minimum allowed Claude Code version for those models
 - `SLACK_WEBHOOK_URL`: LiteLLM Slack webhook
@@ -166,6 +227,9 @@ Required environment variables in `litellm_scripts/.env`:
 
 | File | Description |
 |------|-------------|
+| `portainer/portainer.yaml` | Infrastructure stack with Traefik, Portainer, and optional Cloudflare Tunnel |
+| `portainer/portainer.letsencrypt.yaml` | Optional Traefik override that enables Let's Encrypt ACME and HTTP->HTTPS redirect |
+| `portainer/.env` | Environment variables for the Portainer/Traefik stack |
 | `llmproxy-data.yaml` | PostgreSQL Docker Swarm stack |
 | `llmproxy.yaml` | Application Docker Swarm stack for LiteLLM and CLIProxyAPI |
 | `monitoring/netdata.yaml` | Monitoring stack with Netdata and the label-watching config generator |

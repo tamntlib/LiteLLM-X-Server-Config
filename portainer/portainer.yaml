@@ -1,18 +1,18 @@
 # Environment variables
-# LETSENCRYPT_EMAIL=
-# PORTAINER_HOST=
+# Follow portainer/.env.example for defaults and optional Cloudflare/Let's Encrypt settings.
 
 services:
   traefik:
-    image: traefik:v3.6.6
+    image: traefik:v3.6.13
     command:
       # Entrypoints
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
 
-      # HTTP -> HTTPS redirect
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # Trust X-Forwarded-* headers from internal Docker networks
+      # (required for Cloudflare Tunnel so services see the correct proto/IP)
+      - --entrypoints.web.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      - --entrypoints.websecure.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
       # Swarm provider (Traefik v3)
       - --providers.swarm=true
@@ -21,12 +21,6 @@ services:
 
       # (Optional) dashboard on :8080, you can remove if you don't want it
       - --api.dashboard=true
-
-      # Let's Encrypt (ACME)
-      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.email=${LETSENCRYPT_EMAIL}
-      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.httpchallenge=true
-      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.httpchallenge.entrypoint=web
 
       # Logs
       - --log.level=ERROR
@@ -48,8 +42,23 @@ services:
       - public
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "traefik-letsencrypt-data:/letsencrypt"
     deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks:
+      - public
+    deploy:
+      replicas: ${CLOUDFLARE_TUNNEL_REPLICAS:-0}
       placement:
         constraints:
           - node.role == manager
@@ -78,7 +87,6 @@ services:
       - public
       - agent-network
     deploy:
-      mode: replicated
       replicas: 1
       placement:
         constraints:
@@ -86,16 +94,18 @@ services:
       labels:
         - "traefik.enable=true"
 
-        # Portainer UI (HTTPS)
+        # Portainer UI
         - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
-        - "traefik.http.routers.portainer.entrypoints=websecure"
+        - "traefik.http.routers.portainer.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}"
+        - "traefik.http.routers.portainer.tls=${TRAEFIK_ROUTER_TLS:-false}"
         - "traefik.http.routers.portainer.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}"
         - "traefik.http.services.portainer.loadbalancer.server.port=9000"
         - "traefik.http.routers.portainer.service=portainer"
 
         # (Optional) Edge (HTTPS) - only needed when you use Portainer Edge Agents to connect remote Docker/Kubernetes hosts back to your Portainer server
         # - "traefik.http.routers.edge.rule=Host(`${PORTAINER_EDGE_HOST}`)"
-        # - "traefik.http.routers.edge.entrypoints=websecure"
+        # - "traefik.http.routers.edge.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}"
+        # - "traefik.http.routers.edge.tls=${TRAEFIK_ROUTER_TLS:-false}"
         # - "traefik.http.routers.edge.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}"
         # - "traefik.http.services.edge.loadbalancer.server.port=8000"
         # - "traefik.http.routers.edge.service=edge"
@@ -110,4 +120,3 @@ networks:
 
 volumes:
   portainer-data:
-  traefik-letsencrypt-data:
