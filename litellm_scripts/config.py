@@ -158,21 +158,43 @@ def delete_credential(credential_name):
     return delete_request(f"credentials/{credential_name}")
 
 
+def patch_request(endpoint, data):
+    url = f"{LITELLM_BASE_URL}/{endpoint}"
+    headers = {
+        "Authorization": "Bearer " + LITELLM_API_KEY,
+        "Content-Type": "application/json",
+    }
+    req = build_request(
+        url,
+        data=json.dumps(data).encode(),
+        headers=headers,
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(req) as res:
+            return True, res.read().decode()
+    except urllib.error.HTTPError as e:
+        return False, format_http_error(e)
+    except Exception as e:
+        return False, str(e)
+
+
+def update_credential(credential_name, request_body):
+    return patch_request(f"credentials/{credential_name}", request_body)
+
+
 def create_credential(request_body, force=False):
     credential_name = request_body["credential_name"]
 
     if credential_exists(credential_name):
         if force:
-            delete_credential(credential_name)
-            action = "replaced"
-        else:
-            logger.info(f"Skipped credential: {credential_name}")
-            return True, "skipped", "skipped"
-    else:
-        action = "created"
+            success, result = update_credential(credential_name, request_body)
+            return success, result, "updated"
+        logger.info(f"Skipped credential: {credential_name}")
+        return True, "skipped", "skipped"
 
     success, result = post_request("credentials", request_body)
-    return success, result, action
+    return success, result, "created"
 
 
 async def create_credential_async(executor, request_body, force=False):
@@ -186,12 +208,12 @@ async def create_credential_async(executor, request_body, force=False):
         return success, msg
     success, msg, action = result
     if success:
-        if action == "replaced":
-            logger.info(f"Replaced credential: {credential_name}")
+        if action == "updated":
+            logger.info(f"Updated credential: {credential_name}")
         elif action == "created":
             logger.info(f"Created credential: {credential_name}")
     else:
-        logger.error(f"Failed to create credential: {credential_name} - {msg}")
+        logger.error(f"Failed to sync credential: {credential_name} - {msg}")
     return success, msg
 
 

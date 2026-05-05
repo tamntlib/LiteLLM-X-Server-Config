@@ -1,5 +1,5 @@
 # Environment variables
-# Follow portainer/.env.example for defaults and optional Cloudflare/Let's Encrypt settings.
+# Follow portainer/.env.example for defaults and Cloudflare DNS challenge settings.
 
 services:
   traefik:
@@ -9,15 +9,24 @@ services:
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
 
-      # Trust X-Forwarded-* headers from internal Docker networks
-      # (required for Cloudflare Tunnel so services see the correct proto/IP)
-      - --entrypoints.web.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-      - --entrypoints.websecure.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      # HTTP → HTTPS redirect
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+
+      # Trust X-Forwarded-* headers from Cloudflare Proxy IP ranges
+      # https://www.cloudflare.com/ips/
+      - --entrypoints.websecure.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
 
       # Swarm provider (Traefik v3)
       - --providers.swarm=true
       - --providers.swarm.exposedbydefault=false
       - --providers.swarm.network=public
+
+      # Let's Encrypt via Cloudflare DNS challenge
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.dnschallenge=true
+      - --certificatesresolvers.${LETSENCRYPT_RESOLVER:-le}.acme.dnschallenge.provider=cloudflare
 
       # (Optional) dashboard on :8080, you can remove if you don't want it
       - --api.dashboard=true
@@ -25,8 +34,10 @@ services:
       # Logs
       - --log.level=ERROR
 
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
     ports:
-      # Use LONG SYNTAX to enable host mode: bypasses Swarm Mesh (SNAT) 
+      # Use LONG SYNTAX to enable host mode: bypasses Swarm Mesh (SNAT)
       # to preserve the real Client IP in X-Forwarded-For headers.
       - target: 80
         published: 80
@@ -42,23 +53,8 @@ services:
       - public
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik-letsencrypt-data:/letsencrypt"
     deploy:
-      placement:
-        constraints:
-          - node.role == manager
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command:
-      - tunnel
-      - --no-autoupdate
-      - run
-      - --token
-      - ${CLOUDFLARE_TUNNEL_TOKEN:-}
-    networks:
-      - public
-    deploy:
-      replicas: ${CLOUDFLARE_TUNNEL_REPLICAS:-0}
       placement:
         constraints:
           - node.role == manager
@@ -96,16 +92,16 @@ services:
 
         # Portainer UI
         - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
-        - "traefik.http.routers.portainer.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}"
-        - "traefik.http.routers.portainer.tls=${TRAEFIK_ROUTER_TLS:-false}"
+        - "traefik.http.routers.portainer.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}"
+        - "traefik.http.routers.portainer.tls=${TRAEFIK_ROUTER_TLS:-true}"
         - "traefik.http.routers.portainer.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}"
         - "traefik.http.services.portainer.loadbalancer.server.port=9000"
         - "traefik.http.routers.portainer.service=portainer"
 
         # (Optional) Edge (HTTPS) - only needed when you use Portainer Edge Agents to connect remote Docker/Kubernetes hosts back to your Portainer server
         # - "traefik.http.routers.edge.rule=Host(`${PORTAINER_EDGE_HOST}`)"
-        # - "traefik.http.routers.edge.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}"
-        # - "traefik.http.routers.edge.tls=${TRAEFIK_ROUTER_TLS:-false}"
+        # - "traefik.http.routers.edge.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}"
+        # - "traefik.http.routers.edge.tls=${TRAEFIK_ROUTER_TLS:-true}"
         # - "traefik.http.routers.edge.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}"
         # - "traefik.http.services.edge.loadbalancer.server.port=8000"
         # - "traefik.http.routers.edge.service=edge"
@@ -119,4 +115,5 @@ networks:
     driver: overlay
 
 volumes:
+  traefik-letsencrypt-data:
   portainer-data:

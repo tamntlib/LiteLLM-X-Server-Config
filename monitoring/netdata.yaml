@@ -56,8 +56,8 @@ services:
       labels:
         - traefik.enable=true
         - traefik.http.routers.netdata.rule=Host(`${NETDATA_HOST}`)
-        - traefik.http.routers.netdata.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-web}
-        - traefik.http.routers.netdata.tls=${TRAEFIK_ROUTER_TLS:-false}
+        - traefik.http.routers.netdata.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}
+        - traefik.http.routers.netdata.tls=${TRAEFIK_ROUTER_TLS:-true}
         - traefik.http.routers.netdata.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
         - traefik.http.services.netdata.loadbalancer.server.port=19999
         - traefik.http.routers.netdata.service=netdata

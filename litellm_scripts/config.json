@@ -8,7 +8,9 @@
             "api_base": "http://cli-proxy-api:8317",
             "is_public_model_hub": true,
             "interfaces": {
-                "anthropic": {},
+                "anthropic": {
+                    "model_name_prefix": "anthropic/"
+                },
                 "openai": {}
             }
         },
@@ -19,6 +21,7 @@
             "is_public_model_hub": true,
             "interfaces": {
                 "anthropic": {
+                    "model_name_prefix": "anthropic/",
                     "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
                     "models": {
                         "qwen3.5-plus": {},
@@ -33,6 +36,7 @@
                     "models_autofill_disabled": true
                 },
                 "openai": {
+                    "model_name_prefix": "openai/",
                     "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
                     "models": {
                         "qwen3.5-plus": {},
@@ -62,15 +66,10 @@
         "MiniMax-M2.5": "minimax/MiniMax-M2.5"
     },
     "aliases": {
-        "claude-opus-4-7": "anthropic/gpt-5.4",
-        "claude-opus-4-6": "anthropic/gpt-5.4",
-        "claude-sonnet-4-6": "anthropic/gpt-5.4",
-        "claude-haiku-4-5-20251001": "anthropic/gpt-5.4",
-        "gpt-5.4": "openai/gpt-5.4",
-        "gpt-5.4-mini": "openai/gpt-5.4-mini",
-        "gpt-5.2": "openai/gpt-5.2",
-        "gpt-5.3-codex": "openai/gpt-5.3-codex",
-        "gpt-5.3-codex-spark": "openai/gpt-5.3-codex-spark"
+        "claude-opus-4-7": "anthropic/gpt-5.5",
+        "claude-opus-4-6": "anthropic/gpt-5.5",
+        "claude-sonnet-4-6": "anthropic/gpt-5.5",
+        "claude-haiku-4-5-20251001": "anthropic/gpt-5.5"
     },
     "fallbacks": [
         {

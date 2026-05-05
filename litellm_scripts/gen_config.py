@@ -397,7 +397,7 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
             iface = iface_config if iface_config else {}
             iface_models = iface.get("models", {})
             autofill_disabled = iface.get("models_autofill_disabled", False)
-            model_name_prefix = iface.get("model_name_prefix", provider)
+            model_name_prefix = iface.get("model_name_prefix") or ""
             models_api_base = _get_interface_models_api_base(provider_config, iface)
 
             # Auto-discover models from API unless autofill is disabled
@@ -447,7 +447,7 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
                     access_groups = None
                     is_public_model_hub = None
 
-                derived_model_name = f"{model_name_prefix}/{litellm_model_name}"
+                derived_model_name = f"{model_name_prefix}{litellm_model_name}"
                 model_name = model_group_name or derived_model_name
                 # Resolve base_model: explicit > raw-name map lookup > model-name map lookup > raw model name
                 base_model = (

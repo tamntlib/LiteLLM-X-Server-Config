@@ -1,6 +1,6 @@
 # LiteLLM-X-Server-Config
 
-A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, Netdata, Traefik, and optional Cloudflare Tunnel. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer.
+A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, Netdata, and Traefik. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer. TLS is terminated by Traefik using Let's Encrypt certificates obtained via Cloudflare DNS challenge, with Cloudflare Proxy (orange cloud) providing CDN and DDoS protection.
 
 ## Architecture
 
@@ -8,8 +8,7 @@ This repository is deployed as multiple Docker Swarm stacks:
 
 ### Infrastructure stack (`portainer/portainer.yaml`)
 
-- `traefik`: Shared ingress proxy for Portainer, LiteLLM, CLIProxyAPI, and Netdata
-- `cloudflared`: Optional Cloudflare Tunnel connector that forwards public hostnames to Traefik
+- `traefik`: Shared ingress proxy with Let's Encrypt TLS via Cloudflare DNS challenge
 - `portainer`: Docker Swarm management UI
 - `agent`: Portainer agent for Swarm node access
 
@@ -30,25 +29,24 @@ This repository is deployed as multiple Docker Swarm stacks:
 ### Networks
 
 - `internal`: private overlay network between application services and PostgreSQL
-- `public`: shared overlay network for Traefik, optional `cloudflared`, and routed services
+- `public`: shared overlay network for Traefik and routed services
 - `monitoring`: shared overlay network used by Netdata auto-discovery
 
-## Routing modes
+## Routing
 
-The stacks support two ingress modes:
+Traffic flows through Cloudflare Proxy (orange-cloud DNS records) to Traefik, which terminates TLS using Let's Encrypt certificates obtained via Cloudflare DNS challenge. Traefik trusts Cloudflare's IP ranges for `X-Forwarded-For` headers and redirects HTTP to HTTPS.
 
-- Default: Cloudflare Tunnel forwards requests to Traefik on `http://traefik:80`, so Let's Encrypt is not required.
-- Optional: Traefik can terminate HTTPS itself with Let's Encrypt by deploying `portainer/portainer.letsencrypt.yaml` and switching router env vars from `web`/`false` to `websecure`/`true`.
+Set your Cloudflare SSL/TLS mode to **Full (Strict)** so that Cloudflare verifies the Let's Encrypt certificate on your origin.
 
 ### Shared routing variables
 
 Use the same routing variables in [portainer/.env.example](/Users/tamnt/My-Projects/LiteLLM-X-Server-Config/portainer/.env.example), [monitoring/.env.example](/Users/tamnt/My-Projects/LiteLLM-X-Server-Config/monitoring/.env.example), and [.env.example](/Users/tamnt/My-Projects/LiteLLM-X-Server-Config/.env.example):
 
-| Variable | Default | When to change it |
+| Variable | Default | Description |
 |------|------|-------------|
-| `TRAEFIK_ROUTER_ENTRYPOINTS` | `web` | Set to `websecure` when Traefik terminates HTTPS |
-| `TRAEFIK_ROUTER_TLS` | `false` | Set to `true` when Traefik terminates HTTPS |
-| `LETSENCRYPT_RESOLVER` | `le` | Change only if you use a different Traefik resolver name |
+| `TRAEFIK_ROUTER_ENTRYPOINTS` | `websecure` | Traefik entrypoint for routed services |
+| `TRAEFIK_ROUTER_TLS` | `true` | Enable TLS on Traefik routers |
+| `LETSENCRYPT_RESOLVER` | `le` | Traefik certificate resolver name |
 
 ## Prerequisites
 
@@ -59,19 +57,17 @@ uv tool install ptctools --from git+https://github.com/tamntlib/ptctools.git
 
 ## Installation
 
-### 1. Install Portainer CE, Traefik, and optional Cloudflare Tunnel
+### 1. Install Portainer CE and Traefik
 
-#### Choose how hostnames reach Traefik
+#### Configure DNS
 
-Default Cloudflare Tunnel flow:
+Create DNS `A`/`AAAA` records in Cloudflare for your hostnames (`portainer.example.com`, `netdata.example.com`, `llm.example.com`, `cli-proxy-api.llm.example.com`) pointing to your server's public IP. Enable the orange-cloud proxy for each record.
 
-- Create a remotely managed tunnel in Cloudflare Zero Trust.
-- Add public hostnames such as `portainer.example.com`, `netdata.example.com`, `llm.example.com`, and `cli-proxy-api.llm.example.com`.
-- Point each public hostname at `http://traefik:80`.
+Set your Cloudflare domain's SSL/TLS mode to **Full (Strict)**.
 
-Optional direct HTTPS with Let's Encrypt:
+#### Create a Cloudflare API token
 
-- Create DNS `A`/`AAAA` records for the same hostnames and point them to your server IP.
+Create an API token at <https://dash.cloudflare.com/profile/api-tokens> with **Zone → DNS → Edit** permission. This is used by Traefik to solve Let's Encrypt DNS challenges.
 
 #### Create the Portainer config directory on the server
 
@@ -82,7 +78,7 @@ ssh root@<ip> 'mkdir -p /opt/portainer'
 #### Copy the Portainer stack files to the server
 
 ```sh
-scp portainer/portainer.yaml portainer/portainer.letsencrypt.yaml root@<ip>:/opt/portainer/
+scp portainer/portainer.yaml root@<ip>:/opt/portainer/
 scp portainer/.env.example root@<ip>:/opt/portainer/.env
 ```
 
@@ -101,26 +97,13 @@ docker swarm init
 Edit `/opt/portainer/.env` and set at least:
 
 - `PORTAINER_HOST`
-- `CLOUDFLARE_TUNNEL_REPLICAS=1` and `CLOUDFLARE_TUNNEL_TOKEN=<token>` if you want the built-in `cloudflared` service enabled
-- the shared routing variables from `Routing modes` if you want values other than the defaults
+- `CF_DNS_API_TOKEN=<token>` — Cloudflare API token for Let's Encrypt DNS challenge
+- `LETSENCRYPT_EMAIL=<email>` — email address for Let's Encrypt
 
-##### Deploy Portainer with the default non-Let's Encrypt setup
+##### Deploy Portainer
 
 ```sh
 docker stack deploy -c /opt/portainer/portainer.yaml portainer
-```
-
-##### Optional: enable Let's Encrypt on Traefik
-
-If you want Traefik to terminate HTTPS itself:
-
-1. Set `TRAEFIK_ROUTER_ENTRYPOINTS=websecure` and `TRAEFIK_ROUTER_TLS=true` in `/opt/portainer/.env`.
-2. Set `LETSENCRYPT_EMAIL=<email>` in `/opt/portainer/.env`.
-3. Set the same `TRAEFIK_ROUTER_ENTRYPOINTS=websecure` and `TRAEFIK_ROUTER_TLS=true` values in `monitoring/.env` and `.env` before deploying those stacks.
-4. Deploy with the override file:
-
-```sh
-docker stack deploy -c /opt/portainer/portainer.yaml -c /opt/portainer/portainer.letsencrypt.yaml portainer
 ```
 
 ### 2. Deploy the monitoring stack
@@ -129,8 +112,7 @@ Deploy this first so the shared `monitoring` overlay network exists before the a
 
 #### Expose the Netdata hostname
 
-- Cloudflare Tunnel: add `netdata.example.com` as a public hostname to `http://traefik:80`
-- Direct Let's Encrypt: add `netdata.example.com` as a DNS record to your server IP
+Add a DNS `A`/`AAAA` record for `netdata.example.com` in Cloudflare pointing to your server IP, with the orange-cloud proxy enabled.
 
 #### Set environment variables
 
@@ -145,8 +127,6 @@ Required environment variables:
 - `NETDATA_HOST`: Hostname for the Netdata dashboard
 - `NETDATA_BASIC_AUTH`: Basic auth credentials for Traefik
 
-If you use Traefik-managed HTTPS, also set the shared routing variables from `Routing modes`.
-
 #### Create configs and deploy
 
 ```sh
@@ -159,8 +139,7 @@ ptctools docker stack deploy -n monitoring -f 'monitoring/netdata.yaml' --owners
 
 #### Expose the application hostnames
 
-- Cloudflare Tunnel: add `llm.example.com` and `cli-proxy-api.llm.example.com` as public hostnames to `http://traefik:80`
-- Direct Let's Encrypt: add the same hostnames as DNS records to your server IP
+Add DNS `A`/`AAAA` records for `llm.example.com` and `cli-proxy-api.llm.example.com` in Cloudflare pointing to your server IP, with the orange-cloud proxy enabled.
 
 #### Set environment variables
 
@@ -178,7 +157,6 @@ Required environment variables:
 
 Optional environment variables used by the stack:
 
-- the shared routing variables from `Routing modes` when using Traefik-managed HTTPS
 - `CLAUDE_CODE_MODELS`: Comma-separated model names that should enforce Claude Code checks
 - `CLAUDE_CODE_MIN_VERSION`: Minimum allowed Claude Code version for those models
 - `SLACK_WEBHOOK_URL`: LiteLLM Slack webhook
@@ -227,8 +205,7 @@ Required environment variables in `litellm_scripts/.env`:
 
 | File | Description |
 |------|-------------|
-| `portainer/portainer.yaml` | Infrastructure stack with Traefik, Portainer, and optional Cloudflare Tunnel |
-| `portainer/portainer.letsencrypt.yaml` | Optional Traefik override that enables Let's Encrypt ACME and HTTP->HTTPS redirect |
+| `portainer/portainer.yaml` | Infrastructure stack with Traefik (Let's Encrypt + Cloudflare DNS challenge) and Portainer |
 | `portainer/.env` | Environment variables for the Portainer/Traefik stack |
 | `llmproxy-data.yaml` | PostgreSQL Docker Swarm stack |
 | `llmproxy.yaml` | Application Docker Swarm stack for LiteLLM and CLIProxyAPI |
@@ -335,13 +312,20 @@ Rules:
 
 ### `model_name_prefix`
 
-Each interface may define `model_name_prefix` to control derived model group names. When omitted, it defaults to the interface name.
+Each interface may define `model_name_prefix` to control derived model group names.
 
-Default examples:
+`model_name_prefix` is treated as a literal prefix string:
 
-- `interfaces.anthropic.models.claude-sonnet-4-6` resolves to `anthropic/claude-sonnet-4-6`
-- `interfaces.openai.models.gpt-5.4` resolves to `openai/gpt-5.4`
-- `interfaces.gemini.models.gemini-2.5-pro` resolves to `gemini/gemini-2.5-pro`
+- omitted, `null`, or `""` → no prefix, so the model name is just the model ID
+- `"openai"` → `openaimodel`
+- `"openai/"` → `openai/model`
+- `"openai-"` → `openai-model`
+
+Examples:
+
+- `interfaces.anthropic.models.claude-sonnet-4-6` resolves to `claude-sonnet-4-6`
+- `interfaces.openai.models.gpt-5.4` resolves to `gpt-5.4`
+- `interfaces.gemini.models.gemini-2.5-pro` with `"model_name_prefix": "gemini-"` resolves to `gemini-gemini-2.5-pro`
 
 ```json
 {
@@ -349,7 +333,7 @@ Default examples:
     "my-provider": {
       "interfaces": {
         "anthropic": {
-          "model_name_prefix": "anthropic",
+          "model_name_prefix": "anthropic/",
           "models": {
             "claude-sonnet-4-6": null
           }
@@ -360,7 +344,7 @@ Default examples:
 }
 ```
 
-With no explicit `model_name`, the generated model group name becomes `<model_name_prefix>/<model-id>`. In the example above, `claude-sonnet-4-6` resolves to `anthropic/claude-sonnet-4-6`.
+With no explicit `model_name`, the generated model group name becomes `<model_name_prefix><model-id>`. In the example above, `claude-sonnet-4-6` resolves to `anthropic/claude-sonnet-4-6`.
 
 If `model_name` is set on a model, it still wins and fully overrides the derived prefix-based name.
 
