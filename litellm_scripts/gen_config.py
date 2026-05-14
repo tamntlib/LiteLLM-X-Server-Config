@@ -393,11 +393,17 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
 
         interfaces = provider_config.get("interfaces", {})
 
+        provider_default_models = provider_config.get("models", {})
+        provider_autofill_disabled = provider_config.get("models_autofill_disabled", False)
+
         for provider, iface_config in interfaces.items():
             iface = iface_config if iface_config else {}
-            iface_models = iface.get("models", {})
-            autofill_disabled = iface.get("models_autofill_disabled", False)
-            model_name_prefix = iface.get("model_name_prefix") or ""
+            # Merge provider-level default models with interface-level models;
+            # interface-level definitions take precedence
+            iface_models = {**provider_default_models, **iface.get("models", {})}
+            # Interface-level setting overrides provider-level default
+            autofill_disabled = iface.get("models_autofill_disabled", provider_autofill_disabled)
+            model_name_prefix = iface.get("model_name_prefix") if iface.get("model_name_prefix") is not None else f"{provider}/"
             models_api_base = _get_interface_models_api_base(provider_config, iface)
 
             # Auto-discover models from API unless autofill is disabled
@@ -500,6 +506,59 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
     return models, public_model_hub
 
 
+_ALIAS_REF_PATTERN = re.compile(r"^\$models:(.+?)/(.+?)$")
+
+
+def expand_alias_refs(aliases: dict, models: list) -> dict:
+    """Expand $models:<service>/<interface> references in alias keys.
+
+    When an alias key matches $models:<service>/<interface>,
+    it expands into one alias per model in that provider/interface:
+        raw_model_name -> prefixed_model_name
+
+    If the alias value is non-empty, it is used as the target for all expanded
+    aliases instead of the model_name.
+    """
+    expanded = {}
+
+    for key, value in aliases.items():
+        match = _ALIAS_REF_PATTERN.match(key)
+        if not match:
+            expanded[key] = value
+            continue
+
+        service_name = match.group(1)
+        interface = match.group(2)
+        credential_name = f"{service_name}-{interface}"
+
+        found = False
+        for model in models:
+            if model["litellm_params"].get("litellm_credential_name") != credential_name:
+                continue
+            found = True
+
+            # Extract raw model name by stripping the "provider/" prefix
+            litellm_model = model["litellm_params"]["model"]
+            raw_name = (
+                litellm_model.split("/", 1)[1]
+                if "/" in litellm_model
+                else litellm_model
+            )
+            model_name = model["model_name"]
+
+            # Only alias when raw_name differs from model_name (i.e. a prefix exists)
+            if raw_name != model_name:
+                expanded[raw_name] = value if value else model_name
+
+        if not found:
+            logger.warning(
+                f"⚠️ Alias ref '{key}' matched no models "
+                f"(service={service_name}, interface={interface})"
+            )
+
+    return expanded
+
+
 def generate_config(config_path: Path) -> dict:
     """Load config, merge local overrides, and resolve into deployment-ready format.
 
@@ -552,7 +611,7 @@ def generate_config(config_path: Path) -> dict:
         base_config.get("fallbacks", []),
     )
 
-    aliases = config.get("aliases", {})
+    aliases = expand_alias_refs(config.get("aliases", {}), models)
     public_model_hub_autofill_disabled = config.get(
         "public_model_hub_autofill_disabled", False
     )

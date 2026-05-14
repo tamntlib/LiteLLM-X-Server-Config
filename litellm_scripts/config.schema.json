@@ -18,10 +18,10 @@
         },
         "aliases": {
             "type": "object",
-            "description": "Model name aliases mapping (alias -> target model)",
+            "description": "Model name aliases mapping. Keys can be literal alias names or '$models:<service>/<interface>' refs that expand into one alias per model in that provider/interface (raw model name -> prefixed model name).",
             "additionalProperties": {
                 "type": "string",
-                "description": "Target model name or another alias"
+                "description": "Target model name, another alias, or empty string (for $models: refs, empty means use the prefixed model name)"
             }
         },
         "fallbacks": {
@@ -99,6 +99,17 @@
                     "type": "boolean",
                     "description": "Default public model hub visibility for all models under this provider"
                 },
+                "models": {
+                    "type": "object",
+                    "description": "Default models for all interfaces under this provider. Interface-level models override/extend these.",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/model"
+                    }
+                },
+                "models_autofill_disabled": {
+                    "type": "boolean",
+                    "description": "Default for all interfaces under this provider. Set to true to disable auto-fetching models from the provider's API. Interface-level setting overrides this. Autofill is enabled by default."
+                },
                 "interfaces": {
                     "type": "object",
                     "description": "Provider interfaces (openai, gemini, anthropic)",
@@ -136,7 +147,7 @@
                 },
                 "model_name_prefix": {
                     "type": ["string", "null"],
-                    "description": "Literal prefix for derived model group names on this interface. Defaults to an empty string when omitted or null."
+                    "description": "Literal prefix for derived model group names on this interface. Defaults to '{interface}/' (e.g. 'openai/', 'anthropic/') when omitted or null. Set to empty string to disable prefixing."
                 },
                 "models": {
                     "type": "object",
