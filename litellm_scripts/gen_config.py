@@ -439,14 +439,14 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
                 if isinstance(model_cfg, dict):
                     if model_cfg.get("ignored"):
                         continue
-                    model_group_name = model_cfg.get("model_name")
+                    model_names_str = model_cfg.get("model_names")
                     model_info_cfg = model_cfg.get("model_info", {})
                     base_model = model_info_cfg.get("base_model")
                     litellm_params_cfg = model_cfg.get("litellm_params", {})
                     access_groups = model_cfg.get("access_groups")
                     is_public_model_hub = model_cfg.get("is_public_model_hub")
                 else:
-                    model_group_name = None
+                    model_names_str = None
                     model_info_cfg = {}
                     base_model = None
                     litellm_params_cfg = {}
@@ -454,54 +454,75 @@ def resolve_provider_models(providers: dict, base_model_map: dict = None) -> tup
                     is_public_model_hub = None
 
                 derived_model_name = f"{model_name_prefix}{litellm_model_name}"
-                model_name = model_group_name or derived_model_name
-                # Resolve base_model: explicit > raw-name map lookup > model-name map lookup > raw model name
-                base_model = (
-                    base_model
-                    or base_model_map.get(litellm_model_name)
-                    or base_model_map.get(model_name)
-                    or litellm_model_name
-                )
 
-                # Resolve access_groups: model-level > model_info-level > provider-level
-                resolved_access_groups = (
-                    access_groups
-                    if access_groups is not None
-                    else model_info_cfg.get("access_groups", provider_access_groups)
-                )
+                # Parse model_names: comma-separated list or single name
+                # Leading comma means "include the derived name too":
+                #   ",claude-opus" -> ["<derived>", "<prefix>claude-opus"]
+                #   "claude-opus"  -> ["<prefix>claude-opus"]
+                #   ""  or None    -> ["<derived>"]
+                if model_names_str:
+                    parts = model_names_str.split(",")
+                    model_name_list = []
+                    for i, part in enumerate(parts):
+                        stripped = part.strip()
+                        if stripped:
+                            model_name_list.append(f"{model_name_prefix}{stripped}")
+                        elif i == 0:
+                            # Leading comma: autofill derived name
+                            model_name_list.append(derived_model_name)
+                    if not model_name_list:
+                        model_name_list = [derived_model_name]
+                else:
+                    model_name_list = [derived_model_name]
 
-                # Build model_info
-                model_info = dict(model_info_cfg)
-                if base_model:
-                    model_info["base_model"] = base_model
-                if resolved_access_groups:
-                    model_info["access_groups"] = resolved_access_groups
+                for model_name in model_name_list:
+                    # Resolve base_model: explicit > raw-name map lookup > model-name map lookup > raw model name
+                    resolved_base_model = (
+                        base_model
+                        or base_model_map.get(litellm_model_name)
+                        or base_model_map.get(model_name)
+                        or litellm_model_name
+                    )
 
-                resolved_is_public_model_hub = (
-                    is_public_model_hub
-                    if is_public_model_hub is not None
-                    else provider_is_public_model_hub
-                )
+                    # Resolve access_groups: model-level > model_info-level > provider-level
+                    resolved_access_groups = (
+                        access_groups
+                        if access_groups is not None
+                        else model_info_cfg.get("access_groups", provider_access_groups)
+                    )
 
-                # Build litellm_params
-                litellm_params = dict(litellm_params_cfg)
-                litellm_params.update(
-                    {
-                        "model": f"{provider}/{litellm_model_name}",
-                        "litellm_credential_name": credential_name,
-                    }
-                )
+                    # Build model_info
+                    model_info = dict(model_info_cfg)
+                    if resolved_base_model:
+                        model_info["base_model"] = resolved_base_model
+                    if resolved_access_groups:
+                        model_info["access_groups"] = resolved_access_groups
 
-                models.append(
-                    {
-                        "model_name": model_name,
-                        "litellm_params": litellm_params,
-                        "model_info": model_info,
-                    }
-                )
+                    resolved_is_public_model_hub = (
+                        is_public_model_hub
+                        if is_public_model_hub is not None
+                        else provider_is_public_model_hub
+                    )
 
-                if resolved_is_public_model_hub:
-                    public_model_hub.append(model_name)
+                    # Build litellm_params
+                    litellm_params = dict(litellm_params_cfg)
+                    litellm_params.update(
+                        {
+                            "model": f"{provider}/{litellm_model_name}",
+                            "litellm_credential_name": credential_name,
+                        }
+                    )
+
+                    models.append(
+                        {
+                            "model_name": model_name,
+                            "litellm_params": litellm_params,
+                            "model_info": model_info,
+                        }
+                    )
+
+                    if resolved_is_public_model_hub:
+                        public_model_hub.append(model_name)
 
     return models, public_model_hub
 
@@ -670,26 +691,27 @@ def validate_fallbacks(fallbacks: list, model_names: set, aliases: dict):
 
 
 def validate_public_model_hub(public_model_hub: list, model_names: set, aliases: dict):
-    """Validate that public model hub entries reference existing models or aliases."""
+    """Validate that public model hub entries reference existing models or aliases.
+
+    Removes duplicates in-place.
+    """
     valid_targets = model_names | set(aliases.keys())
     seen = set()
-    duplicates = set()
+    i = 0
 
-    for entry in public_model_hub:
+    while i < len(public_model_hub):
+        entry = public_model_hub[i]
         if entry in seen:
-            duplicates.add(entry)
-        else:
-            seen.add(entry)
+            public_model_hub.pop(i)
+            continue
+        seen.add(entry)
 
         if entry not in valid_targets:
             logger.warning(
                 f"⚠️ Public model hub entry '{entry}' is not a known model or alias"
             )
+        i += 1
 
-    if duplicates:
-        logger.warning(
-            f"⚠️ Duplicate public model hub entries found: {sorted(duplicates)}"
-        )
 
 
 _litellm_prices_cache = None

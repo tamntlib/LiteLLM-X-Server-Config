@@ -10,10 +10,15 @@
             "models_autofill_disabled": true,
             "models": {
                 "claude-opus-4-7": {},
-                "claude-opus-4-6": {},
+                "claude-opus-4-6": {
+                    "model_names": ",primary"
+                },
                 "claude-sonnet-4-6": {},
                 "claude-haiku-4-5-20251001": {},
-                "gpt-5.5": {},
+                "gpt-5.5": {
+                    "model_names": ",primary"
+                },
+                "gpt-5.4-mini": {},
                 "gpt-image-2": {},
                 "codex-auto-review": {}
             },
@@ -33,7 +38,9 @@
             "is_public_model_hub": true,
             "models_autofill_disabled": true,
             "models": {
-                "qwen3.6-plus": {}
+                "qwen3.6-plus": {
+                    "model_names": ",secondary"
+                }
             },
             "interfaces": {
                 "anthropic": {
@@ -50,25 +57,38 @@
         "qwen3.6-plus": "openrouter/qwen/qwen3.6-plus"
     },
     "aliases": {
-        "$models:cli-proxy-api/openai": "",
-        "claude-opus-4-7": "anthropic/gpt-5.5",
-        "claude-sonnet-4-6": "anthropic/gpt-5.5",
-        "claude-haiku-4-5-20251001": "anthropic/gpt-5.5"
+        "claude-opus-4-7": "anthropic/primary",
+        "claude-sonnet-4-6": "anthropic/primary",
+        "claude-haiku-4-5-20251001": "anthropic/primary",
+        "gpt-5.5": "openai/gpt-5.5",
+        "gpt-5.4-mini": "openai/gpt-5.4-mini",
+        "gpt-image-2": "openai/gpt-image-2",
+        "codex-auto-review": "openai/codex-auto-review"
     },
     "fallbacks": [
         {
             "claude-opus-4-7": [
-                "anthropic/qwen3.6-plus"
+                "anthropic/secondary"
             ]
         },
         {
             "claude-sonnet-4-6": [
-                "anthropic/qwen3.6-plus"
+                "anthropic/secondary"
             ]
         },
         {
             "claude-haiku-4-5-20251001": [
-                "anthropic/qwen3.6-plus"
+                "anthropic/secondary"
+            ]
+        },
+        {
+            "gpt-5.5": [
+                "openai/secondary"
+            ]
+        },
+        {
+            "gpt-5.4-mini": [
+                "openai/secondary"
             ]
         }
     ]
