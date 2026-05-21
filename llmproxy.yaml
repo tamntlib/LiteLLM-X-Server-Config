@@ -2,6 +2,7 @@
 volumes:
   cli-proxy-api-auth-data:
   cli-proxy-api-config-data:
+  cli-proxy-api-usage-data:
 
 x-common-healthcheck: &common-healthcheck
   interval: 30s # Perform health check every 30 seconds
@@ -21,7 +22,7 @@ x-common-deploy: &common-deploy
     order: stop-first
 
 x-cli-proxy-api: &cli-proxy-api
-  image: eceasy/cli-proxy-api:latest
+  image: ghcr.io/tamntlib/cli-proxy-api-plus:latest
   command:
     - sh
     - -c
@@ -29,7 +30,7 @@ x-cli-proxy-api: &cli-proxy-api
       if [ ! -f /CLIProxyAPI/config/config.yaml ]; then
         cp /CLIProxyAPI/config_ro/config.yaml /CLIProxyAPI/config/config.yaml
       fi
-      exec ./CLIProxyAPI --config /CLIProxyAPI/config/config.yaml
+      exec ./CLIProxyAPIPlus --config /CLIProxyAPI/config/config.yaml
   environment:
     TZ: ${TZ:-UTC}
   healthcheck:
@@ -61,8 +62,37 @@ services:
         - traefik.http.services.cli-proxy-api.loadbalancer.server.port=8317
         - traefik.http.routers.cli-proxy-api.service=cli-proxy-api
 
+  cli-proxy-api-usage:
+    image: ghcr.io/willxup/cpa-usage-keeper:latest
+    environment:
+      TZ: ${TZ:-UTC}
+      CPA_BASE_URL: http://cli-proxy-api:8317
+      CPA_MANAGEMENT_KEY: ${CLI_PROXY_API_MANAGEMENT_KEY}
+      REDIS_QUEUE_ADDR: cli-proxy-api:8317
+      AUTH_ENABLED: ${CLI_PROXY_API_USAGE_AUTH_ENABLED:-true}
+      LOGIN_PASSWORD: ${CLI_PROXY_API_USAGE_LOGIN_PASSWORD}
+    volumes:
+      - cli-proxy-api-usage-data:/data
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      start_period: 10s
+    networks:
+      - internal
+      - public
+    deploy:
+      <<: *common-deploy
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.cli-proxy-api-usage.rule=Host(`${CLI_PROXY_API_USAGE_HOST}`)
+        - traefik.http.routers.cli-proxy-api-usage.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}
+        - traefik.http.routers.cli-proxy-api-usage.tls=${TRAEFIK_ROUTER_TLS:-true}
+        - traefik.http.routers.cli-proxy-api-usage.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
+        - traefik.http.services.cli-proxy-api-usage.loadbalancer.server.port=8080
+        - traefik.http.routers.cli-proxy-api-usage.service=cli-proxy-api-usage
+
   litellm:
-    image: tamntlib/litellm-database:v1.83.3-stable
+    image: tamntlib/litellm-database:v1.85.1
     command: ["--config", "/app/config.yaml", "--num_workers", "4"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
