@@ -93,7 +93,7 @@ services:
 
   litellm:
     image: tamntlib/litellm-database:v1.85.1
-    command: ["--config", "/app/config.yaml", "--num_workers", "4"]
+    command: ["--config", "/app/config.yaml", "--num_workers", "4", "--use_v2_migration_resolver"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
       STORE_MODEL_IN_DB: "True" # allows adding models to proxy via UI
@@ -105,8 +105,6 @@ services:
       LITELLM_LOG: ERROR
       JSON_LOGS: "True"
       USE_PRISMA_MIGRATE: "True"
-      SEPARATE_HEALTH_APP: "1"
-      SEPARATE_HEALTH_PORT: "4001"
       LITELLM_DROP_PARAMS: "True"
       CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS}
       CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION}"
@@ -119,7 +117,7 @@ services:
       <<: *common-healthcheck
       test:
         - CMD-SHELL
-        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4001/health/liveliness')" # Command to execute for health check
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')" # Command to execute for health check
       start_period: 60s # Wait 60 seconds after container start before beginning health checks
     networks:
       - internal

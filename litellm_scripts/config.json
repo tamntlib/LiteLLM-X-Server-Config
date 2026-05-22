@@ -44,6 +44,26 @@
                     "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1"
                 }
             }
+        },
+        "xiaomimimo": {
+            "access_groups": [
+                "General"
+            ],
+            "is_public_model_hub": true,
+            "models_autofill_disabled": true,
+            "models": {
+                "mimo-v2.5-pro": {
+                    "model_names": ",secondary"
+                }
+            },
+            "interfaces": {
+                "anthropic": {
+                    "api_base": "https://token-plan-sgp.xiaomimimo.com/anthropic"
+                },
+                "openai": {
+                    "api_base": "https://token-plan-sgp.xiaomimimo.com/v1"
+                }
+            }
         }
     },
     "public_model_hub": [],
