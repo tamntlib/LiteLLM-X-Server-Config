@@ -214,5 +214,7 @@ configs/cli-proxy-api.yaml
 litellm_scripts/litellm_openapi.json
 litellm_scripts/config.local.json
 litellm_scripts/config.gen.json
+litellm_scripts/api_key_limits.local.json
 
 .DS_Store
+claude_test

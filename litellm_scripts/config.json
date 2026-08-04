@@ -2,108 +2,109 @@
     "$schema": "./config.schema.json",
     "providers": {
         "cli-proxy-api": {
+            "api_base": "http://cli-proxy-api:8317",
+            "models_autofill_disabled": true,
             "access_groups": [
                 "General"
             ],
-            "api_base": "http://cli-proxy-api:8317",
-            "is_public_model_hub": true,
-            "models_autofill_disabled": true,
             "models": {
-                "claude-opus-4-7": {},
-                "claude-opus-4-6": {},
-                "claude-sonnet-4-6": {},
-                "claude-haiku-4-5-20251001": {},
-                "gpt-5.5": {
-                    "model_names": ",primary"
-                },
-                "gpt-5.4-mini": {},
-                "gpt-image-2": {},
-                "codex-auto-review": {}
+                "primary": {},
+                "primary-vision": {},
+                "secondary": {},
+                "secondary-vision": {},
+                "tertiary": {},
+                "tertiary-vision": {},
+                "gpt-5.5": {},
+                "gpt-5.4": {},
+                "gpt-5.4-mini": {}
             },
             "interfaces": {
                 "anthropic": {},
-                "openai": {}
-            }
-        },
-        "alibabacloud": {
-            "access_groups": [
-                "General"
-            ],
-            "is_public_model_hub": true,
-            "models_autofill_disabled": true,
-            "models": {
-                "qwen3.6-plus": {
-                    "model_names": ",secondary"
-                }
-            },
-            "interfaces": {
-                "anthropic": {
-                    "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
-                },
                 "openai": {
-                    "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1"
-                }
-            }
-        },
-        "xiaomimimo": {
-            "access_groups": [
-                "General"
-            ],
-            "is_public_model_hub": true,
-            "models_autofill_disabled": true,
-            "models": {
-                "mimo-v2.5-pro": {
-                    "model_names": ",secondary"
-                }
-            },
-            "interfaces": {
-                "anthropic": {
-                    "api_base": "https://token-plan-sgp.xiaomimimo.com/anthropic"
-                },
-                "openai": {
-                    "api_base": "https://token-plan-sgp.xiaomimimo.com/v1"
+                    "models": {
+                        "gpt-image-2": {},
+                        "codex-auto-review": {}
+                    }
                 }
             }
         }
     },
-    "public_model_hub": [],
+    "public_model_hub_aliases_autofill_disabled": true,
     "model_name_base_model_map": {
-        "qwen3.6-plus": "openrouter/qwen/qwen3.6-plus"
+        "primary": "gpt-5.6-sol",
+        "primary-vision": "gpt-5.6-sol",
+        "secondary": "gpt-5.6-terra",
+        "secondary-vision": "gpt-5.6-terra",
+        "tertiary": "gpt-5.6-luna",
+        "tertiary-vision": "gpt-5.6-luna"
+    },
+    "guardrails": {
+        "headroom-compression": {
+            "litellm_params": {
+                "guardrail": "headroom",
+                "mode": "pre_call",
+                "default_on": true,
+                "api_base": "http://headroom:8787"
+            },
+            "guardrail_info": {
+                "description": "Global Headroom prompt compression"
+            }
+        }
     },
     "aliases": {
-        "claude-opus-4-7": "anthropic/primary",
-        "claude-sonnet-4-6": "anthropic/primary",
-        "claude-haiku-4-5-20251001": "anthropic/primary",
-        "gpt-5.5": "openai/gpt-5.5",
-        "gpt-5.4-mini": "openai/gpt-5.4-mini",
-        "gpt-image-2": "openai/gpt-image-2",
+        "claude-fable-*": "anthropic/primary",
+        "claude-opus-*": "anthropic/primary",
+        "claude-sonnet-*": "anthropic/secondary",
+        "claude-haiku-*": "anthropic/tertiary",
+        "gpt-*": "openai/primary",
+        "gpt-*-sol": "openai/primary",
+        "gpt-*-terra": "openai/secondary",
+        "gpt-*-luna": "openai/tertiary",
+        "gpt-*-mini": "openai/gpt-5.4-mini",
+        "gpt-image-*": "openai/gpt-image-2",
         "codex-auto-review": "openai/codex-auto-review"
     },
     "fallbacks": [
         {
-            "claude-opus-4-7": [
-                "anthropic/secondary"
+            "$interface/primary": [
+                "$interface/secondary",
+                "$interface/tertiary"
             ]
         },
         {
-            "claude-sonnet-4-6": [
-                "anthropic/secondary"
+            "$interface/secondary": [
+                "$interface/primary",
+                "$interface/tertiary"
             ]
         },
         {
-            "claude-haiku-4-5-20251001": [
-                "anthropic/secondary"
+            "$interface/tertiary": [
+                "$interface/primary",
+                "$interface/secondary"
             ]
         },
         {
-            "gpt-5.5": [
-                "openai/secondary"
+            "$interface/primary-vision": [
+                "$interface/secondary-vision",
+                "$interface/tertiary-vision"
             ]
         },
         {
-            "gpt-5.4-mini": [
-                "openai/secondary"
+            "$interface/secondary-vision": [
+                "$interface/primary-vision",
+                "$interface/tertiary-vision"
+            ]
+        },
+        {
+            "$interface/tertiary-vision": [
+                "$interface/primary-vision",
+                "$interface/secondary-vision"
             ]
         }
-    ]
+    ],
+    "router_settings": {
+        "cooldown_time": 0,
+        "num_retries": 1,
+        "timeout": 600
+    }
 }

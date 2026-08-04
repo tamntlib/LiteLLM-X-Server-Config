@@ -1,0 +1,63 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://example.com/litellm-api-key-limits.schema.json",
+    "title": "LiteLLM API Key Limits",
+    "description": "Per-key limit overrides used by update_api_key_limits.py. A selector may be a key alias, key name, hash, token, user ID, or user email.",
+    "type": "object",
+    "properties": {
+        "$schema": {
+            "type": "string",
+            "description": "JSON Schema reference"
+        }
+    },
+    "propertyNames": {
+        "minLength": 1
+    },
+    "additionalProperties": {
+        "$ref": "#/definitions/keyLimits"
+    },
+    "definitions": {
+        "keyLimits": {
+            "type": "object",
+            "description": "Limit overrides for the matching API key. Explicit limits take precedence over their multipliers.",
+            "minProperties": 1,
+            "properties": {
+                "rpm_limit": {
+                    "description": "Absolute requests-per-minute limit. Use null for unlimited.",
+                    "anyOf": [
+                        {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "rpm_limit_multiplier": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Multiplier applied to the default RPM limit when rpm_limit is omitted. The result must be an integer."
+                },
+                "max_budget": {
+                    "description": "Absolute maximum budget. Use null for unlimited.",
+                    "anyOf": [
+                        {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "max_budget_multiplier": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Multiplier applied to the default maximum budget when max_budget is omitted."
+                }
+            },
+            "additionalProperties": false
+        }
+    }
+}

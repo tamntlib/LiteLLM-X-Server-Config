@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Unified LiteLLM management script for credentials, models, aliases, fallbacks, and public model hub.
+Unified LiteLLM management script for credentials, models, aliases, fallbacks,
+public model hub, router settings, and guardrails.
 
 Configuration:
-    - config.json: Base configuration (providers, models, aliases, fallbacks, public_model_hub)
+    - config.json: Base configuration (providers, models, aliases, fallbacks,
+      public_model_hub, router_settings, guardrails)
     - config.local.json: Local overrides (extends/overrides config.json)
       Include api_key in provider config for credentials:
       {
@@ -15,7 +17,7 @@ Configuration:
       }
 
 Usage:
-    python3 config.py --only credentials,models,aliases,fallbacks,public_model_hub --force --prune
+    uv run python config.py --only credentials,models,aliases,fallbacks,public_model_hub,router_settings,guardrails --force --prune
 """
 
 import asyncio
@@ -98,6 +100,27 @@ def post_request(endpoint, data):
         "Content-Type": "application/json",
     }
     req = build_request(url, data=json.dumps(data).encode(), headers=headers)
+    try:
+        with urllib.request.urlopen(req) as res:
+            return True, res.read().decode()
+    except urllib.error.HTTPError as e:
+        return False, format_http_error(e)
+    except Exception as e:
+        return False, str(e)
+
+
+def put_request(endpoint, data):
+    url = f"{LITELLM_BASE_URL}/{endpoint}"
+    headers = {
+        "Authorization": "Bearer " + LITELLM_API_KEY,
+        "Content-Type": "application/json",
+    }
+    req = build_request(
+        url,
+        data=json.dumps(data).encode(),
+        headers=headers,
+        method="PUT",
+    )
     try:
         with urllib.request.urlopen(req) as res:
             return True, res.read().decode()
@@ -235,6 +258,10 @@ def delete_model_by_id(model_id):
     return post_request("model/delete", {"id": model_id})
 
 
+def _model_credential_name(model: dict) -> str:
+    return model.get("litellm_params", {}).get("litellm_credential_name", "")
+
+
 def _create_model(payload, force, actor, existing_models_cache):
     """Create or replace a single model from a pre-built payload.
 
@@ -248,7 +275,7 @@ def _create_model(payload, force, actor, existing_models_cache):
         (success, action, duplicates_deleted)
     """
     full_model_name = payload["model_name"]
-    credential_name = payload["litellm_params"]["litellm_credential_name"]
+    credential_name = _model_credential_name(payload)
 
     # Check if model exists using cached models (could have multiple duplicates)
     model_key = (full_model_name, credential_name)
@@ -358,8 +385,8 @@ def get_current_aliases():
     return settings.get("model_group_alias", {})
 
 
-def update_aliases(aliases: dict, force=False):
-    if not aliases:
+def update_aliases(aliases: dict | None, force=False):
+    if aliases is None:
         logger.info("No aliases to update")
         return True, "no aliases"
 
@@ -472,6 +499,110 @@ def update_public_model_hub(model_groups: list, force=False):
 
 
 # ============================================================================
+# Guardrail Management
+# ============================================================================
+
+
+def get_all_guardrails():
+    """Return guardrails stored in LiteLLM's database."""
+    success, result = get_request("v2/guardrails/list")
+    if not success:
+        return False, result
+
+    guardrails = (
+        result.get("guardrails", result) if isinstance(result, dict) else result
+    )
+    if not isinstance(guardrails, list):
+        return False, "Unexpected response from /v2/guardrails/list"
+    return True, guardrails
+
+
+def _config_contains(actual, desired):
+    """Compare desired config while ignoring server-generated fields/defaults."""
+    if isinstance(desired, dict):
+        if not isinstance(actual, dict):
+            return False
+        return all(
+            key in actual and _config_contains(actual[key], value)
+            for key, value in desired.items()
+        )
+    if isinstance(desired, list):
+        return isinstance(actual, list) and actual == desired
+    return actual == desired
+
+
+def create_guardrail(guardrail: dict):
+    return post_request("guardrails", {"guardrail": guardrail})
+
+
+def update_guardrail(guardrail_id: str, guardrail: dict):
+    return put_request(f"guardrails/{guardrail_id}", {"guardrail": guardrail})
+
+
+def sync_guardrails(config: dict):
+    logger.info("=" * 60)
+    logger.info("Syncing guardrails...")
+    logger.info("=" * 60)
+
+    desired_guardrails = config.get("guardrails", [])
+    if not desired_guardrails:
+        logger.info("No guardrails in config, skipping")
+        return True
+
+    success, existing_guardrails = get_all_guardrails()
+    if not success:
+        logger.error(f"Failed to list guardrails: {existing_guardrails}")
+        return False
+
+    existing_by_name = {}
+    for guardrail in existing_guardrails:
+        if not isinstance(guardrail, dict) or not guardrail.get("guardrail_name"):
+            continue
+        name = guardrail["guardrail_name"]
+        if name in existing_by_name:
+            logger.warning(f"Duplicate guardrail name returned by LiteLLM: {name}")
+            continue
+        existing_by_name[name] = guardrail
+
+    all_succeeded = True
+    for desired in desired_guardrails:
+        if not isinstance(desired, dict) or not desired.get("guardrail_name"):
+            logger.error(f"Invalid guardrail config: {desired}")
+            all_succeeded = False
+            continue
+
+        name = desired["guardrail_name"]
+        existing = existing_by_name.get(name)
+        if existing is None:
+            success, result = create_guardrail(desired)
+            if success:
+                logger.info(f"Created guardrail: {name}")
+            else:
+                logger.error(f"Failed to create guardrail {name}: {result}")
+                all_succeeded = False
+            continue
+
+        if _config_contains(existing, desired):
+            logger.info(f"Guardrail already up-to-date, skipping: {name}")
+            continue
+
+        guardrail_id = existing.get("guardrail_id") or existing.get("id")
+        if not guardrail_id:
+            logger.error(f"Cannot update guardrail {name}: missing guardrail_id")
+            all_succeeded = False
+            continue
+
+        success, result = update_guardrail(guardrail_id, desired)
+        if success:
+            logger.info(f"Updated guardrail: {name}")
+        else:
+            logger.error(f"Failed to update guardrail {name}: {result}")
+            all_succeeded = False
+
+    return all_succeeded
+
+
+# ============================================================================
 # Main Sync Functions
 # ============================================================================
 
@@ -536,7 +667,7 @@ async def sync_models(config: dict, force=False, prune=False):
     for model in all_models:
         key = (
             model["model_name"],
-            model["litellm_params"]["litellm_credential_name"],
+            _model_credential_name(model),
         )
         if key not in existing_models_cache:
             existing_models_cache[key] = []
@@ -558,7 +689,7 @@ async def sync_models(config: dict, force=False, prune=False):
 
         for payload in model_payloads:
             full_model_name = payload["model_name"]
-            credential_name = payload["litellm_params"]["litellm_credential_name"]
+            credential_name = _model_credential_name(payload)
             expected_models.add((full_model_name, credential_name))
 
             tasks.append(
@@ -582,7 +713,7 @@ async def sync_models(config: dict, force=False, prune=False):
         existing_models = get_all_models()
         for model in existing_models:
             model_name = model["model_name"]
-            credential_name = model["litellm_params"]["litellm_credential_name"]
+            credential_name = _model_credential_name(model)
             model_id = model["model_info"]["id"]
             if (model_name, credential_name) not in expected_models:
                 logger.info(f"Pruning model: {model_name} ({credential_name})")
@@ -613,7 +744,7 @@ def sync_aliases(config: dict, force=False):
     logger.info("Syncing aliases...")
     logger.info("=" * 60)
 
-    aliases = config.get("aliases", {})
+    aliases = config.get("aliases") if "aliases" in config else None
     update_aliases(aliases, force)
 
 
@@ -635,6 +766,19 @@ def sync_public_model_hub(config: dict, force=False):
     update_public_model_hub(public_model_hub, force)
 
 
+def sync_router_settings(config: dict, force=False):
+    logger.info("=" * 60)
+    logger.info("Syncing router settings...")
+    logger.info("=" * 60)
+
+    router_settings = config.get("router_settings", {})
+    if not router_settings:
+        logger.info("No router_settings in config, skipping")
+        return
+
+    update_router_settings(router_settings)
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -645,8 +789,8 @@ async def main():
     parser.add_argument(
         "--only",
         type=str,
-        default="credentials,models,aliases,fallbacks,public_model_hub",
-        help="Comma-separated list of components to sync (credentials,models,aliases,fallbacks,public_model_hub)",
+        default="credentials,models,aliases,fallbacks,public_model_hub,router_settings,guardrails",
+        help="Comma-separated list of components to sync (credentials,models,aliases,fallbacks,public_model_hub,router_settings,guardrails)",
     )
     parser.add_argument(
         "--force",
@@ -679,6 +823,8 @@ async def main():
         "aliases",
         "fallbacks",
         "public_model_hub",
+        "router_settings",
+        "guardrails",
     }
     invalid = set(components) - valid_components
     if invalid:
@@ -716,6 +862,14 @@ async def main():
 
     if "public_model_hub" in components:
         sync_public_model_hub(config, args.force)
+
+    if "router_settings" in components:
+        sync_router_settings(config, args.force)
+
+    if "guardrails" in components:
+        if not sync_guardrails(config):
+            logger.error("❌ Guardrail sync failed")
+            raise SystemExit(1)
 
     logger.info("=" * 60)
     logger.info("✅ Sync complete!")

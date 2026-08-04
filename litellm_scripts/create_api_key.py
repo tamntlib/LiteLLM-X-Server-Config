@@ -14,6 +14,29 @@ load_dotenv()
 
 LITELLM_API_KEY = os.environ["LITELLM_API_KEY"]
 LITELLM_BASE_URL = os.environ["LITELLM_BASE_URL"]
+DEFAULT_KEY_RPM_LIMIT = 50
+DEFAULT_KEY_MAX_BUDGET = 3000
+DEFAULT_KEY_BUDGET_DURATION = "1mo"
+
+
+def positive_int(value):
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def positive_float(value):
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive number") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number")
+    return parsed
 
 
 def get_user_by_email(email):
@@ -72,14 +95,24 @@ def create_user(email):
         sys.exit(1)
 
 
-def create_api_key(user_id, key_alias, key_value=None):
+def create_api_key(
+    user_id,
+    key_alias,
+    key_value=None,
+    rpm_limit=DEFAULT_KEY_RPM_LIMIT,
+    max_budget=DEFAULT_KEY_MAX_BUDGET,
+    budget_duration=DEFAULT_KEY_BUDGET_DURATION,
+):
     """Create an API key for the given user."""
     payload = {
         "user_id": user_id,
         "team_id": None,
         "key_alias": key_alias,
-        "models": ["all-team-models"],
+        "models": [],
         "key_type": "llm_api",
+        "rpm_limit": rpm_limit,
+        "max_budget": max_budget,
+        "budget_duration": budget_duration,
         "metadata": {},
     }
 
@@ -109,11 +142,35 @@ def main():
     parser.add_argument("email", help="User email address")
     parser.add_argument("--alias", "-a", help="API key alias (default: email prefix)")
     parser.add_argument("--key", "-k", help="Custom API key value (optional)")
+    parser.add_argument(
+        "--rpm-limit",
+        "--rpm",
+        type=positive_int,
+        default=DEFAULT_KEY_RPM_LIMIT,
+        help=(
+            "Requests per minute limit for the API key "
+            f"(default: {DEFAULT_KEY_RPM_LIMIT})"
+        ),
+    )
+    parser.add_argument(
+        "--max-budget",
+        type=positive_float,
+        default=DEFAULT_KEY_MAX_BUDGET,
+        help=f"Max budget for the API key (default: {DEFAULT_KEY_MAX_BUDGET:g})",
+    )
+    parser.add_argument(
+        "--budget-duration",
+        default=DEFAULT_KEY_BUDGET_DURATION,
+        help=f"Budget reset duration for the API key (default: {DEFAULT_KEY_BUDGET_DURATION})",
+    )
     args = parser.parse_args()
 
     email = args.email
     key_alias = args.alias or email.split("@")[0]
     key_value = args.key
+    rpm_limit = args.rpm_limit
+    max_budget = args.max_budget
+    budget_duration = args.budget_duration
 
     print(f"📧 Processing: {email}", file=sys.stderr)
 
@@ -130,8 +187,20 @@ def main():
         print(f"✅ User created: {user_id}", file=sys.stderr)
 
     # Create API key
-    print(f"🔑 Creating API key...", file=sys.stderr)
-    key_result = create_api_key(user_id, key_alias, key_value)
+    print(
+        "🔑 Creating API key "
+        f"(rpm_limit={rpm_limit}, max_budget={max_budget:g}, "
+        f"budget_duration={budget_duration})...",
+        file=sys.stderr,
+    )
+    key_result = create_api_key(
+        user_id,
+        key_alias,
+        key_value,
+        rpm_limit,
+        max_budget,
+        budget_duration,
+    )
     api_key = key_result.get("key")
 
     print(f"✅ API key created", file=sys.stderr)

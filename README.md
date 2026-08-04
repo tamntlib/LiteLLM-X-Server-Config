@@ -1,6 +1,6 @@
 # LiteLLM-X-Server-Config
 
-A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, Netdata, and Traefik. It provides centralized API key management, model routing, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer. TLS is terminated by Traefik using Let's Encrypt certificates obtained via Cloudflare DNS challenge, with Cloudflare Proxy (orange cloud) providing CDN and DDoS protection.
+A self-hosted LLM proxy stack built around [LiteLLM](https://github.com/BerriAI/litellm), [Headroom](https://github.com/headroomlabs-ai/headroom), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), PostgreSQL, Netdata, and Traefik. It provides centralized API key management, model routing, global prompt compression, access-group control, Claude Code request validation, and optional monitoring for a Docker Swarm deployment managed through Portainer. TLS is terminated by Traefik using Let's Encrypt certificates obtained via Cloudflare DNS challenge, with Cloudflare Proxy (orange cloud) providing CDN and DDoS protection.
 
 ## Architecture
 
@@ -19,12 +19,13 @@ This repository is deployed as multiple Docker Swarm stacks:
 ### Application stack (`llmproxy.yaml`)
 
 - `cli-proxy-api`: Anthropic-compatible proxy and auth service
+- `cli-proxy-api-usage`: Usage keeper dashboard for CLIProxyAPI
+- `headroom`: Prompt-compression proxy called by LiteLLM, with its dashboard exposed through Traefik BasicAuth
 - `litellm`: Core routing layer and LiteLLM admin UI
 
 ### Monitoring stack (`monitoring/netdata.yaml`)
 
-- `netdata`: Host and container monitoring dashboard
-- `config-generator`: Sidecar that watches Docker labels and generates Netdata collector configs
+- `netdata`: Host, container, and PostgreSQL monitoring dashboard
 
 ### Networks
 
@@ -61,7 +62,7 @@ uv tool install ptctools --from git+https://github.com/tamntlib/ptctools.git
 
 #### Configure DNS
 
-Create DNS `A`/`AAAA` records in Cloudflare for your hostnames (`portainer.example.com`, `netdata.example.com`, `llm.example.com`, `cli-proxy-api.llm.example.com`) pointing to your server's public IP. Enable the orange-cloud proxy for each record.
+Create DNS `A`/`AAAA` records in Cloudflare for your hostnames (`portainer.example.com`, `netdata.example.com`, `llm.example.com`, `headroom.llm.example.com`, `cli-proxy-api.llm.example.com`) pointing to your server's public IP. Enable the orange-cloud proxy for each record.
 
 Set your Cloudflare domain's SSL/TLS mode to **Full (Strict)**.
 
@@ -131,7 +132,6 @@ Required environment variables:
 
 ```sh
 ptctools docker config set -n monitoring_netdata-conf -f 'monitoring/configs/netdata.conf'
-ptctools docker config set -n monitoring_config-generator-script -f 'monitoring/scripts/netdata-config-generator.sh'
 ptctools docker stack deploy -n monitoring -f 'monitoring/netdata.yaml' --ownership team
 ```
 
@@ -139,7 +139,7 @@ ptctools docker stack deploy -n monitoring -f 'monitoring/netdata.yaml' --owners
 
 #### Expose the application hostnames
 
-Add DNS `A`/`AAAA` records for `llm.example.com` and `cli-proxy-api.llm.example.com` in Cloudflare pointing to your server IP, with the orange-cloud proxy enabled.
+Add DNS `A`/`AAAA` records for `llm.example.com`, `headroom.llm.example.com`, `cli-proxy-api.llm.example.com`, and `cli-proxy-api-usage.llm.example.com` in Cloudflare pointing to your server IP, with the orange-cloud proxy enabled.
 
 #### Set environment variables
 
@@ -151,14 +151,19 @@ cp .env.example .env
 
 Required environment variables:
 
-- `DB_USER`, `DB_PASSWORD`, `DB_NAME`: PostgreSQL credentials
+- `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_HOST`: PostgreSQL credentials and host
 - `LITELLM_HOST`, `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`: LiteLLM configuration
+- `HEADROOM_HOST`, `HEADROOM_API_KEY`, `HEADROOM_BASIC_AUTH`: Headroom dashboard hostname, shared proxy token, and Traefik BasicAuth credentials
 - `CLI_PROXY_API_HOST`: CLIProxyAPI hostname
+- `CLI_PROXY_API_USAGE_HOST`, `CLI_PROXY_API_USAGE_LOGIN_PASSWORD`: CLIProxyAPI usage dashboard configuration
 
 Optional environment variables used by the stack:
 
 - `CLAUDE_CODE_MODELS`: Comma-separated model names that should enforce Claude Code checks
 - `CLAUDE_CODE_MIN_VERSION`: Minimum allowed Claude Code version for those models
+- `HEADROOM_TELEMETRY`: Enable Headroom's local event recording and dashboard statistics; defaults to `on`
+- `HEADROOM_COMPRESS_USER_MESSAGES`: Set to `1` to compress user/system messages, which is required for most Claude Code traffic
+- `HEADROOM_COMPRESS_ALLOW_REMOTE`: Set to `1` so LiteLLM can call `/v1/compress` from its separate container
 - `SLACK_WEBHOOK_URL`: LiteLLM Slack webhook
 
 #### Upload configs and deploy
@@ -168,7 +173,6 @@ export PORTAINER_URL=https://portainer.example.com
 export PORTAINER_ACCESS_TOKEN=<token>
 
 ptctools docker config set -n llmproxy_litellm-config-yaml -f 'configs/litellm.yaml' --ownership team
-ptctools docker config set -n llmproxy_litellm-claude-code-hook-py -f 'configs/claude_code_hook.py' --ownership team
 ptctools docker config set -n llmproxy_cli-proxy-api-config-yaml -f 'configs/cli-proxy-api.yaml' --ownership team
 
 ptctools docker stack deploy -n llmproxy-data -f 'llmproxy-data.yaml' --ownership team
@@ -181,19 +185,24 @@ ptctools docker stack deploy -n llmproxy -f 'llmproxy.yaml' --ownership team
 cd litellm_scripts
 
 # Generate a resolved config from config.json + config.local.json
-python3 gen_config.py
+uv run python gen_config.py
 
-# Full sync of credentials, models, aliases, fallbacks, and public model hub
-python3 config.py --only credentials,models,aliases,fallbacks,public_model_hub --force --prune
+# Full sync including globally enabled guardrails
+uv run python config.py --only credentials,models,aliases,fallbacks,public_model_hub,router_settings,guardrails --force --prune
 
 # Sync specific components
-python3 config.py --only models --force
-python3 config.py --only aliases,fallbacks,public_model_hub
-python3 config.py --only public_model_hub
+uv run python config.py --only models --force
+uv run python config.py --only aliases,fallbacks,public_model_hub
+uv run python config.py --only public_model_hub
+uv run python config.py --only guardrails --force
 
 # Create a LiteLLM user and API key
-python3 create_api_key.py user@example.com
-python3 create_api_key.py user@example.com --alias my-key
+uv run python create_api_key.py user@example.com
+uv run python create_api_key.py user@example.com --alias my-key
+
+# Preview and apply limits for existing API keys
+uv run python update_api_key_limits.py
+uv run python update_api_key_limits.py --yes
 ```
 
 Required environment variables in `litellm_scripts/.env`:
@@ -208,14 +217,15 @@ Required environment variables in `litellm_scripts/.env`:
 | `portainer/portainer.yaml` | Infrastructure stack with Traefik (Let's Encrypt + Cloudflare DNS challenge) and Portainer |
 | `portainer/.env` | Environment variables for the Portainer/Traefik stack |
 | `llmproxy-data.yaml` | PostgreSQL Docker Swarm stack |
-| `llmproxy.yaml` | Application Docker Swarm stack for LiteLLM and CLIProxyAPI |
+| `llmproxy.yaml` | Application Docker Swarm stack for LiteLLM, Headroom, and CLIProxyAPI |
 | `monitoring/netdata.yaml` | Monitoring stack with Netdata and the label-watching config generator |
 | `configs/litellm.yaml` | LiteLLM runtime config (callbacks, DB batching, connection pool settings) |
 | `configs/cli-proxy-api.yaml` | CLIProxyAPI runtime config |
-| `configs/claude_code_hook.py` | LiteLLM callback that enforces Claude Code User-Agent and minimum version rules |
-| `litellm_scripts/config.json` | Base provider/model/alias/fallback/public-model-hub config |
+| `litellm_scripts/config.json` | Base provider/model/alias/fallback/public-model-hub/router/guardrail config |
 | `litellm_scripts/config.local.json` | Local overrides including API keys (gitignored, deep-merged with `config.json`) |
 | `litellm_scripts/config.gen.json` | Generated resolved config output from `gen_config.py` with LiteLLM-ready credential and model request bodies |
+| `litellm_scripts/api_key_limits.json` | Shared per-key RPM and max-budget overrides |
+| `litellm_scripts/api_key_limits.local.json` | Private per-key limit overrides (gitignored, deep-merged with `api_key_limits.json`) |
 | `.env` | Environment variables for the application stacks |
 | `monitoring/.env` | Environment variables for the monitoring stack |
 
@@ -237,6 +247,71 @@ Create `litellm_scripts/config.local.json` to add API keys and local overrides:
 ```
 
 This file is deep-merged with `config.json`, so you only need to specify overrides. Provider configs can also use `$extend` in `config.json` and override or disable inheritance in `config.local.json`.
+
+### API key limit overrides
+
+Add shared overrides to `litellm_scripts/api_key_limits.json` and private overrides to the gitignored `litellm_scripts/api_key_limits.local.json`:
+
+```json
+{
+  "key-alias": {
+    "rpm_limit": 4000,
+    "max_budget": 5000
+  }
+}
+```
+
+Selectors can match a key alias, key name, hash/token, API key, user ID, or email. The local file is deep-merged over the base file, including individual fields for the same selector. If a key matches multiple selectors, the first selector wins. Keys or fields without an override use the script/CLI defaults: 100 RPM and a 3000 max budget by default.
+
+Run `uv run python update_api_key_limits.py` to inspect the effective limits without changing keys, then add `--yes` only after reviewing the dry-run output. Raw keys and other sensitive selectors should only be stored in `api_key_limits.local.json`.
+
+### Global Headroom compression
+
+The application stack pulls the public `ghcr.io/headroomlabs-ai/headroom` image. The `headroom-compression` guardrail sets `api_base` directly to `http://headroom:8787`, so LiteLLM calls `/v1/compress` over the private `internal` network without a separate `HEADROOM_API_BASE` environment variable. This container-to-container request is not loopback, so `HEADROOM_COMPRESS_ALLOW_REMOTE=1` is required.
+
+Put only the raw Headroom token override in the gitignored `litellm_scripts/config.local.json`. Guardrails are keyed by name and deep-merged with the base config:
+
+```json
+{
+  "guardrails": {
+    "headroom-compression": {
+      "litellm_params": {
+        "api_key": "your-raw-headroom-token"
+      }
+    }
+  }
+}
+```
+
+`gen_config.py` converts the keyed object into LiteLLM's required list format and adds `guardrail_name` from the object key. `config.py` then sends the merged guardrail to LiteLLM's Guardrail API. The token is stored in LiteLLM's guardrail database configuration; neither `config.py` nor the LiteLLM container reads `HEADROOM_API_KEY` from the root `.env`. The root `.env` still needs the same token for the Headroom container and Traefik header middleware.
+
+The dashboard is available at `https://${HEADROOM_HOST}/dashboard` through this request flow:
+
+```text
+Browser
+  -> Traefik BasicAuth
+  -> inject X-Headroom-Proxy-Token
+  -> Headroom dashboard
+```
+
+Generate `HEADROOM_BASIC_AUTH` with `htpasswd` and escape every `$` as `$$` before putting it in `.env`:
+
+```sh
+htpasswd -nb admin '<password>' | sed -e 's/\$/\$\$/g'
+```
+
+Traefik only publishes `/dashboard`, `/stats*`, `/health`, and `/favicon.ico`; `/v1/compress` remains unavailable through the public router. BasicAuth removes the browser's `Authorization` header, then the second middleware injects `X-Headroom-Proxy-Token` from `HEADROOM_API_KEY`. The resolved raw proxy token is intentionally visible in the service's Docker/Portainer labels and stored in LiteLLM's guardrail database configuration, so access to both systems must remain restricted.
+
+`HEADROOM_TELEMETRY=on` enables Headroom's local event recording used by dashboard statistics; in the current Headroom image this does not upload request data to Headroom Labs. Some dashboard panels, including the transformations feed and settings, may remain unavailable remotely because Headroom itself restricts their backing endpoints to loopback callers. Aggregate statistics, history, and health remain available.
+
+The `headroom-compression` guardrail in `litellm_scripts/config.json` uses `default_on: true`, so it applies to every virtual key and model without requiring a per-request `guardrails` field. Register or reconcile it in LiteLLM's database after deploying the stack:
+
+```sh
+cd litellm_scripts
+uv run python config.py --only guardrails --force
+```
+
+LiteLLM Headroom integration requires LiteLLM v1.92.x or newer. The LiteLLM image remains unpinned by design, so verify the running version after each deployment. Confirm compression by checking the `x-litellm-applied-guardrails: headroom-compression` response header or the Guardrails panel in LiteLLM Logs. Anthropic messages carrying `cache_control` markers are intentionally not compressed.
 
 ### Interface-level `api_base`
 
@@ -357,7 +432,36 @@ These resolved prefixed names are the ones used by generated models and should b
 
 ### Model-level `access_groups`
 
-Individual models can override the provider-level `access_groups` by specifying `access_groups` in their model config:
+Individual models can override the provider-level `access_groups` by specifying `access_groups` in their model config. You can also override `access_groups` per generated model name by using the object form of `model_names` with the reserved key `$self`:
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "access_groups": ["General"],
+      "models": {
+        "model-a": null,
+        "model-b": {
+          "access_groups": ["Premium"]
+        },
+        "model-c": {
+          "access_groups": ["Internal"],
+          "model_names": {
+            "$self": {},
+            "alias": {
+              "access_groups": ["General"]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- `model-a` inherits the provider-level `access_groups`: `["General"]`
+- `model-b` uses its own `access_groups`: `["Premium"]`
+- `model-c` generates two entries: `model-c` uses `["Internal"]` and `alias` uses `["General"]`
 
 ```json
 {
@@ -406,18 +510,12 @@ Netdata collects host, container, and PostgreSQL metrics.
 
 Netdata limits local metrics storage to 10 GiB in `monitoring/configs/netdata.conf`, which provides roughly 2-4 weeks of retention depending on metric volume.
 
-### Auto-discovery
+### PostgreSQL auto-discovery
 
-Services can self-register for PostgreSQL monitoring by adding Docker labels:
+Netdata uses its built-in Docker auto-discovery to collect PostgreSQL metrics from containers that expose port `5432` or use a PostgreSQL image. To allow the default discovered job to connect, create a dedicated monitoring user in each PostgreSQL container:
 
-```yaml
-deploy:
-  labels:
-    - netdata.postgres.name=my_database
-    - netdata.postgres.dsn=postgresql://user:pass@host:5432/dbname
-
-networks:
-  - monitoring
+```sh
+psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "CREATE USER netdata WITH PASSWORD 'postgres'; GRANT pg_monitor TO netdata;"
 ```
 
-The service must also join the shared `monitoring` network so the Netdata stack can reach it.
+The service must join the shared `monitoring` network so the Netdata stack can reach the discovered container address.

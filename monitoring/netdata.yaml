@@ -65,30 +65,9 @@ services:
         - traefik.http.routers.netdata.middlewares=netdata-auth
         - traefik.http.middlewares.netdata-auth.basicauth.users=${NETDATA_BASIC_AUTH}
 
-  # Sidecar that watches Docker labels and generates Netdata configs
-  config-generator:
-    image: docker:cli
-    command: ["/bin/sh", "/scripts/netdata-config-generator.sh"]
-    environment:
-      - POLL_INTERVAL=${CONFIG_POLL_INTERVAL:-30}
-    volumes:
-      - netdata-config:/etc/netdata
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    configs:
-      - source: config-generator-script
-        target: /scripts/netdata-config-generator.sh
-        mode: 0755
-    networks:
-      - monitoring
-    deploy:
-      mode: global
-
 configs:
   netdata-conf:
     name: ${NETDATA_CONF_NAME:-monitoring_netdata-conf}
-    external: true
-  config-generator-script:
-    name: ${CONFIG_GENERATOR_SCRIPT_NAME:-monitoring_config-generator-script}
     external: true
 
 networks:

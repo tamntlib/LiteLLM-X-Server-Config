@@ -3,6 +3,7 @@ volumes:
   cli-proxy-api-auth-data:
   cli-proxy-api-config-data:
   cli-proxy-api-usage-data:
+  headroom-data:
 
 x-common-healthcheck: &common-healthcheck
   interval: 30s # Perform health check every 30 seconds
@@ -21,8 +22,16 @@ x-common-deploy: &common-deploy
     delay: 10s
     order: stop-first
 
+x-stop-first-deploy: &stop-first-deploy
+  <<: *common-deploy
+  update_config:
+    parallelism: 1
+    delay: 10s
+    order: stop-first
+    failure_action: rollback
+
 x-cli-proxy-api: &cli-proxy-api
-  image: ghcr.io/tamntlib/cli-proxy-api-plus:latest
+  image: eceasy/cli-proxy-api
   command:
     - sh
     - -c
@@ -30,12 +39,14 @@ x-cli-proxy-api: &cli-proxy-api
       if [ ! -f /CLIProxyAPI/config/config.yaml ]; then
         cp /CLIProxyAPI/config_ro/config.yaml /CLIProxyAPI/config/config.yaml
       fi
-      exec ./CLIProxyAPIPlus --config /CLIProxyAPI/config/config.yaml
+      exec ./CLIProxyAPI --config /CLIProxyAPI/config/config.yaml
   environment:
     TZ: ${TZ:-UTC}
   healthcheck:
     <<: *common-healthcheck
-    test: ["CMD-SHELL", "wget -q --spider http://localhost:8317/ || exit 1"]
+    test:
+    - CMD-SHELL
+    - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8317 && printf \"GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && read -r status <&3 && [[ \"$$status\" == HTTP/*\" 2\"* || \"$$status\" == HTTP/*\" 3\"* ]]'"
     start_period: 10s
   networks:
     - internal
@@ -63,7 +74,7 @@ services:
         - traefik.http.routers.cli-proxy-api.service=cli-proxy-api
 
   cli-proxy-api-usage:
-    image: ghcr.io/willxup/cpa-usage-keeper:latest
+    image: ghcr.io/willxup/cpa-usage-keeper
     environment:
       TZ: ${TZ:-UTC}
       CPA_BASE_URL: http://cli-proxy-api:8317
@@ -91,11 +102,44 @@ services:
         - traefik.http.services.cli-proxy-api-usage.loadbalancer.server.port=8080
         - traefik.http.routers.cli-proxy-api-usage.service=cli-proxy-api-usage
 
+  headroom:
+    image: ghcr.io/headroomlabs-ai/headroom
+    environment:
+      HEADROOM_TELEMETRY: ${HEADROOM_TELEMETRY:-on}
+      HEADROOM_COMPRESS_USER_MESSAGES: "${HEADROOM_COMPRESS_USER_MESSAGES:-1}"
+      HEADROOM_COMPRESS_ALLOW_REMOTE: "${HEADROOM_COMPRESS_ALLOW_REMOTE:-1}"
+      HEADROOM_PROXY_TOKEN: ${HEADROOM_API_KEY:-}
+    volumes:
+      - headroom-data:/home/nonroot/.headroom
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8787/readyz"]
+      start_period: 20s
+    networks:
+      - internal
+      - public
+      - monitoring
+    deploy:
+      <<: *common-deploy
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=${PUBLIC_NETWORK:-public}
+        - traefik.http.routers.headroom-dashboard.rule=Host(`${HEADROOM_HOST}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/stats`) || Path(`/health`) || Path(`/favicon.ico`))
+        - traefik.http.routers.headroom-dashboard.entrypoints=${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}
+        - traefik.http.routers.headroom-dashboard.tls=${TRAEFIK_ROUTER_TLS:-true}
+        - traefik.http.routers.headroom-dashboard.tls.certresolver=${LETSENCRYPT_RESOLVER:-le}
+        - traefik.http.routers.headroom-dashboard.service=headroom-dashboard
+        - traefik.http.services.headroom-dashboard.loadbalancer.server.port=8787
+        - traefik.http.routers.headroom-dashboard.middlewares=headroom-dashboard-auth,headroom-dashboard-token
+        - traefik.http.middlewares.headroom-dashboard-auth.basicauth.users=${HEADROOM_BASIC_AUTH}
+        - traefik.http.middlewares.headroom-dashboard-auth.basicauth.removeheader=true
+        - traefik.http.middlewares.headroom-dashboard-token.headers.customrequestheaders.X-Headroom-Proxy-Token=${HEADROOM_API_KEY}
+
   litellm:
-    image: tamntlib/litellm-database:v1.85.1
+    image: tamntlib/litellm-database
     command: ["--config", "/app/config.yaml", "--num_workers", "4", "--use_v2_migration_resolver"]
     environment:
-      DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@db:5432/${DB_NAME:-app}"
+      DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@${DB_HOST:-llmproxy-data_db}:5432/${DB_NAME:-app}"
       STORE_MODEL_IN_DB: "True" # allows adding models to proxy via UI
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-litellm_master_key}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-litellm_salt_key}
@@ -106,13 +150,14 @@ services:
       JSON_LOGS: "True"
       USE_PRISMA_MIGRATE: "True"
       LITELLM_DROP_PARAMS: "True"
-      CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS}
-      CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION}"
+      CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS:-claude-*}
+      CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION:-2.1.140}"
+      LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/primary,anthropic/secondary,anthropic/tertiary,openai/primary,openai/secondary,openai/tertiary}
+      CONTENT_PREVIEW_MAX_LENGTH: ${CONTENT_PREVIEW_MAX_LENGTH:-100}
+      USER_TEXT_PREVIEW_MAX_LENGTH: ${USER_TEXT_PREVIEW_MAX_LENGTH:-2048}
     configs:
       - source: litellm-config-yaml
         target: /app/config.yaml
-      - source: litellm-claude-code-hook-py
-        target: /app/claude_code_hook.py
     healthcheck: # Defines the health check configuration for the container
       <<: *common-healthcheck
       test:
@@ -124,7 +169,7 @@ services:
       - public
       - monitoring
     deploy:
-      <<: *common-deploy
+      <<: *stop-first-deploy
       labels:
         - traefik.enable=true
         - traefik.http.routers.litellm.rule=Host(`${LITELLM_HOST}`)
@@ -141,13 +186,10 @@ configs:
   litellm-config-yaml:
     name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm-config-yaml}
     external: true
-  litellm-claude-code-hook-py:
-    name: ${LITELLM_CLAUDE_CODE_HOOK_NAME:-llmproxy_litellm-claude-code-hook-py}
-    external: true
 
 networks:
   internal:
-    name: ${PUBLIC_NETWORK:-llmproxy}
+    name: ${INTERNAL_NETWORK:-llmproxy}
     external: true
   public:
     name: ${PUBLIC_NETWORK:-public}
