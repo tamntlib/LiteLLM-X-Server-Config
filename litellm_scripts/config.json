@@ -7,6 +7,11 @@
             "access_groups": [
                 "General"
             ],
+            "default_model": {
+                "model_info": {
+                    "max_input_tokens": 272000
+                }
+            },
             "models": {
                 "primary": {},
                 "primary-vision": {},
@@ -22,8 +27,20 @@
                 "anthropic": {},
                 "openai": {
                     "models": {
-                        "gpt-image-2": {},
-                        "codex-auto-review": {}
+                        "gpt-image-2": {
+                            "model_info": {
+                                "$delete": [
+                                    "max_input_tokens"
+                                ]
+                            }
+                        },
+                        "codex-auto-review": {
+                            "model_info": {
+                                "$delete": [
+                                    "max_input_tokens"
+                                ]
+                            }
+                        }
                     }
                 }
             }
@@ -44,7 +61,8 @@
                 "guardrail": "headroom",
                 "mode": "pre_call",
                 "default_on": true,
-                "api_base": "http://headroom:8787"
+                "api_base": "http://headroom:8787",
+                "unreachable_fallback": "fail_open"
             },
             "guardrail_info": {
                 "description": "Global Headroom prompt compression"

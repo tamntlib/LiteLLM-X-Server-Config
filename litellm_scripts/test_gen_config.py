@@ -7,10 +7,254 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from gen_config import generate_config, resolve_provider_models, _resolve_alias_group, expand_interface_vars
+from gen_config import deep_merge, generate_config, resolve_provider_models, _resolve_alias_group, expand_interface_vars
+
+
+class DeepMergeTest(unittest.TestCase):
+    def test_delete_keyword_removes_keys_recursively_and_never_leaks(self):
+        merged = deep_merge(
+            {
+                "keep": 1,
+                "remove_top": 2,
+                "nested": {
+                    "keep": 3,
+                    "remove_nested": 4,
+                },
+            },
+            {
+                "$delete": ["remove_top", "missing", "same_merge", 123],
+                "nested": {
+                    "$delete": ["remove_nested"],
+                },
+                "new_nested": {
+                    "$delete": ["never_existed"],
+                },
+                "same_merge": "re-added before deletion pass",
+            },
+        )
+
+        self.assertEqual(
+            merged,
+            {"keep": 1, "nested": {"keep": 3}, "new_nested": {}},
+        )
 
 
 class ResolveProviderModelsTest(unittest.TestCase):
+    def test_provider_default_model_is_deep_merged_before_model_overrides(self):
+        providers = {
+            "svc": {
+                "api_key": "dummy",
+                "models_autofill_disabled": True,
+                "default_model": {
+                    "model_info": {
+                        "max_input_tokens": 272000,
+                        "supports_vision": True,
+                    },
+                    "litellm_params": {
+                        "timeout": 600,
+                    },
+                },
+                "models": {
+                    "gpt-5.5": {
+                        "model_info": {
+                            "max_output_tokens": 32000,
+                        },
+                        "model_names": {
+                            "$self": {},
+                            "primary": {
+                                "model_info": {
+                                    "max_input_tokens": 128000,
+                                },
+                            },
+                        },
+                    }
+                },
+                "interfaces": {
+                    "openai": {},
+                },
+            }
+        }
+
+        models, _ = resolve_provider_models(providers, {})
+
+        by_name = {model["model_name"]: model for model in models}
+        self.assertEqual(
+            by_name["openai/gpt-5.5"]["model_info"]["max_input_tokens"],
+            272000,
+        )
+        self.assertEqual(
+            by_name["openai/gpt-5.5"]["model_info"]["max_output_tokens"],
+            32000,
+        )
+        self.assertTrue(
+            by_name["openai/gpt-5.5"]["model_info"]["supports_vision"]
+        )
+        self.assertEqual(
+            by_name["openai/gpt-5.5"]["litellm_params"]["timeout"],
+            600,
+        )
+        self.assertEqual(
+            by_name["openai/primary"]["model_info"]["max_input_tokens"],
+            128000,
+        )
+        self.assertEqual(
+            by_name["openai/primary"]["model_info"]["max_output_tokens"],
+            32000,
+        )
+
+    def test_delete_keyword_removes_inherited_default(self):
+        providers = {
+            "svc": {
+                "api_key": "dummy",
+                "models_autofill_disabled": True,
+                "default_model": {
+                    "model_info": {
+                        "max_input_tokens": 272000,
+                        "supports_vision": True,
+                    }
+                },
+                "models": {
+                    "gpt-image-2": {
+                        "model_info": {
+                            "max_output_tokens": 32000,
+                        }
+                    }
+                },
+                "interfaces": {
+                    "openai": {
+                        "models": {
+                            "gpt-image-2": {
+                                "model_info": {
+                                    "$delete": ["max_input_tokens"],
+                                }
+                            }
+                        }
+                    },
+                },
+            }
+        }
+
+        models, _ = resolve_provider_models(providers, {})
+
+        self.assertEqual(len(models), 1)
+        self.assertNotIn("max_input_tokens", models[0]["model_info"])
+        self.assertEqual(models[0]["model_info"]["max_output_tokens"], 32000)
+        self.assertTrue(models[0]["model_info"]["supports_vision"])
+
+    def test_interface_model_overrides_provider_model_and_default_model(self):
+        providers = {
+            "svc": {
+                "api_key": "dummy",
+                "models_autofill_disabled": True,
+                "default_model": {
+                    "model_info": {
+                        "max_input_tokens": 272000,
+                        "supports_vision": True,
+                    }
+                },
+                "models": {
+                    "gpt-5.5": {
+                        "model_info": {
+                            "max_output_tokens": 32000,
+                        }
+                    }
+                },
+                "interfaces": {
+                    "anthropic": {},
+                    "openai": {
+                        "models": {
+                            "gpt-5.5": {
+                                "model_info": {
+                                    "max_input_tokens": 128000,
+                                }
+                            }
+                        }
+                    },
+                },
+            }
+        }
+
+        models, _ = resolve_provider_models(providers, {})
+
+        by_name = {model["model_name"]: model for model in models}
+        self.assertEqual(
+            by_name["anthropic/gpt-5.5"]["model_info"]["max_input_tokens"],
+            272000,
+        )
+        self.assertEqual(
+            by_name["openai/gpt-5.5"]["model_info"]["max_input_tokens"],
+            128000,
+        )
+        self.assertEqual(
+            by_name["openai/gpt-5.5"]["model_info"]["max_output_tokens"],
+            32000,
+        )
+        self.assertTrue(
+            by_name["openai/gpt-5.5"]["model_info"]["supports_vision"]
+        )
+
+    def test_auto_discovered_models_inherit_provider_default_model(self):
+        providers = {
+            "svc": {
+                "api_key": "dummy",
+                "api_base": "https://example.test",
+                "default_model": {
+                    "model_info": {
+                        "max_input_tokens": 272000,
+                    }
+                },
+                "interfaces": {
+                    "openai": {},
+                },
+            }
+        }
+
+        with patch("gen_config.fetch_models_from_api", return_value=["discovered"]):
+            models, _ = resolve_provider_models(providers, {})
+
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0]["model_name"], "openai/discovered")
+        self.assertEqual(models[0]["model_info"]["max_input_tokens"], 272000)
+
+    def test_generated_model_alias_inherits_provider_default_model(self):
+        config = {
+            "$schema": "./config.schema.json",
+            "providers": {
+                "svc": {
+                    "api_key": "dummy",
+                    "models_autofill_disabled": True,
+                    "default_model": {
+                        "model_info": {
+                            "max_input_tokens": 272000,
+                        }
+                    },
+                    "models": {
+                        "gpt-5.5": {},
+                    },
+                    "interfaces": {
+                        "openai": {},
+                    },
+                }
+            },
+            "model_aliases": {
+                "primary": {
+                    "openai/gpt-5.5": {},
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(json.dumps(config))
+            with patch("gen_config.validate_prices"):
+                generated = generate_config(config_path)
+
+        alias_model = next(
+            model for model in generated["models"]
+            if model["model_name"] == "primary"
+        )
+        self.assertEqual(alias_model["model_info"]["max_input_tokens"], 272000)
+
     def test_model_names_object_uses_self_and_per_name_access_groups(self):
         providers = {
             "svc": {

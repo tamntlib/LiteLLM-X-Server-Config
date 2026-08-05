@@ -55,14 +55,30 @@ def load_json(file_path):
         return json.load(f)
 
 
+_DELETE_KEYS = "$delete"
+
+
 def deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge two dictionaries. Override values take precedence."""
+    """Deep merge dictionaries, with $delete listing inherited keys to remove."""
     result = base.copy()
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = deep_merge(result[key], value)
+        if key == _DELETE_KEYS:
+            continue
+        if isinstance(value, dict):
+            nested_base = result.get(key, {})
+            result[key] = deep_merge(
+                nested_base if isinstance(nested_base, dict) else {},
+                value,
+            )
         else:
             result[key] = value
+
+    delete_keys = override.get(_DELETE_KEYS, [])
+    if isinstance(delete_keys, list):
+        for key in delete_keys:
+            if isinstance(key, str):
+                result.pop(key, None)
+
     return result
 
 
@@ -447,17 +463,14 @@ def resolve_provider_models_with_alias_targets(
 
         interfaces = provider_config.get("interfaces", {})
 
+        provider_default_model = provider_config.get("default_model") or {}
         provider_default_models = provider_config.get("models", {})
         provider_autofill_disabled = provider_config.get("models_autofill_disabled", False)
 
         for provider, iface_config in interfaces.items():
             iface = iface_config if iface_config else {}
-            # Merge provider-level default models with interface-level models;
-            # interface-level definitions take precedence
-            iface_models = {
-                k: deep_merge(provider_default_models.get(k, {}), v) if isinstance(provider_default_models.get(k), dict) and isinstance(v, dict) else v
-                for k, v in {**provider_default_models, **iface.get("models", {})}.items()
-            }
+            interface_models = iface.get("models", {})
+            iface_models = {**provider_default_models, **interface_models}
             # Interface-level setting overrides provider-level default
             autofill_disabled = iface.get("models_autofill_disabled", provider_autofill_disabled)
             model_name_prefix = iface.get("model_name_prefix") if iface.get("model_name_prefix") is not None else f"{provider}/"
@@ -492,14 +505,29 @@ def resolve_provider_models_with_alias_targets(
 
             credential_name = f"{service_name}-{provider}"
 
-            for litellm_model_name, model_cfg in iface_models.items():
-                if isinstance(model_cfg, dict):
-                    if model_cfg.get("ignored"):
-                        continue
-                    model_names_cfg = model_cfg.get("model_names")
+            for litellm_model_name, discovered_model_cfg in iface_models.items():
+                provider_model_cfg = provider_default_models.get(
+                    litellm_model_name,
+                    {},
+                )
+                if litellm_model_name in interface_models:
+                    interface_model_cfg = interface_models[litellm_model_name]
+                elif litellm_model_name not in provider_default_models:
+                    interface_model_cfg = discovered_model_cfg
                 else:
-                    model_names_cfg = None
-                    model_cfg = {}
+                    interface_model_cfg = {}
+
+                model_cfg = deep_merge(
+                    provider_default_model,
+                    provider_model_cfg if isinstance(provider_model_cfg, dict) else {},
+                )
+                model_cfg = deep_merge(
+                    model_cfg,
+                    interface_model_cfg if isinstance(interface_model_cfg, dict) else {},
+                )
+                if model_cfg.get("ignored"):
+                    continue
+                model_names_cfg = model_cfg.get("model_names")
 
                 target_model = f"{provider}/{litellm_model_name}"
                 target_litellm_params = dict(model_cfg.get("litellm_params", {}))

@@ -9,6 +9,9 @@
             "type": "string",
             "description": "JSON Schema reference"
         },
+        "$delete": {
+            "$ref": "#/$defs/delete_keys"
+        },
         "providers": {
             "type": "object",
             "description": "Service providers configuration",
@@ -116,6 +119,14 @@
         }
     },
     "$defs": {
+        "delete_keys": {
+            "type": "array",
+            "description": "Reserved deep-merge directive listing inherited keys to remove from the current object.",
+            "items": {
+                "type": "string"
+            },
+            "uniqueItems": true
+        },
         "guardrail": {
             "type": "object",
             "description": "LiteLLM guardrail configuration. guardrail_name is supplied by the parent object key.",
@@ -238,6 +249,10 @@
                     "type": "boolean",
                     "description": "Default public model hub visibility for all models under this provider"
                 },
+                "default_model": {
+                    "$ref": "#/$defs/model",
+                    "description": "Default model configuration deep-merged into every explicit or auto-discovered model under this provider. Model-specific and per-name settings take precedence."
+                },
                 "models": {
                     "type": "object",
                     "description": "Default models for all interfaces under this provider. Interface-level models override/extend these.",
@@ -272,6 +287,9 @@
             "type": "object",
             "description": "Interface-specific configuration",
             "properties": {
+                "$delete": {
+                    "$ref": "#/$defs/delete_keys"
+                },
                 "api_base": {
                     "type": "string",
                     "description": "Base URL override for this interface. Defaults to the provider-level api_base."
@@ -307,6 +325,9 @@
                     "type": "object",
                     "description": "Model configuration",
                     "properties": {
+                        "$delete": {
+                            "$ref": "#/$defs/delete_keys"
+                        },
                         "ignored": {
                             "type": "boolean",
                             "description": "If true, skip exposing this model completely."

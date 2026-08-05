@@ -313,6 +313,46 @@ uv run python config.py --only guardrails --force
 
 LiteLLM Headroom integration requires LiteLLM v1.92.x or newer. The LiteLLM image remains unpinned by design, so verify the running version after each deployment. Confirm compression by checking the `x-litellm-applied-guardrails: headroom-compression` response header or the Guardrails panel in LiteLLM Logs. Anthropic messages carrying `cache_control` markers are intentionally not compressed.
 
+### Provider-level `default_model`
+
+Use `default_model` to define model configuration that should be deep-merged into every explicit or auto-discovered model under a provider:
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "default_model": {
+        "model_info": {
+          "max_input_tokens": 272000
+        }
+      },
+      "models": {
+        "model-a": {},
+        "model-b": {
+          "model_info": {
+            "max_input_tokens": 128000
+          }
+        }
+      },
+      "interfaces": {
+        "openai": {}
+      }
+    }
+  }
+}
+```
+
+`model-a` inherits `max_input_tokens: 272000`; `model-b` overrides it with `128000`. Nested `model_info` and `litellm_params` objects are deep-merged. Precedence, from lowest to highest, is:
+
+1. provider-level `default_model`
+2. provider-level `models.<model>`
+3. interface-level `interfaces.<interface>.models.<model>`
+4. per-name overrides in the object form of `model_names`
+
+To remove inherited keys, add a reserved `$delete` array in the same object. For example, `"model_info": {"$delete": ["max_input_tokens"]}` removes `max_input_tokens`; multiple keys can be listed in the same array. This deletion syntax applies recursively to every configuration merged by `deep_merge`, not only model configuration, and `$delete` is not emitted in the generated output.
+
+Generated model aliases inherit the resolved defaults from their target model. Top-level manual `models` entries are not provider models and do not inherit `default_model`.
+
 ### Interface-level `api_base`
 
 Each interface may override the provider-level `api_base`. This is useful when a single provider exposes different OpenAI-compatible and Anthropic-compatible endpoints.
