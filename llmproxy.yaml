@@ -169,7 +169,7 @@ services:
       - public
       - monitoring
     deploy:
-      <<: *stop-first-deploy
+      <<: *common-deploy
       labels:
         - traefik.enable=true
         - traefik.http.routers.litellm.rule=Host(`${LITELLM_HOST}`)
