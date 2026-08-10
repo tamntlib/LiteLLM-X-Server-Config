@@ -103,7 +103,7 @@ services:
         - traefik.http.routers.cli-proxy-api-usage.service=cli-proxy-api-usage
 
   headroom:
-    image: ghcr.io/headroomlabs-ai/headroom
+    image: ghcr.io/headroomlabs-ai/headroom:code-nonroot
     environment:
       HEADROOM_TELEMETRY: ${HEADROOM_TELEMETRY:-on}
       HEADROOM_COMPRESS_USER_MESSAGES: "${HEADROOM_COMPRESS_USER_MESSAGES:-1}"
