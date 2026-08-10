@@ -8,11 +8,23 @@
                 "General"
             ],
             "models": {
-                "primary": {},
+                "primary": {
+                    "model_info": {
+                        "max_input_tokens": 272000
+                    }
+                },
                 "primary-vision": {},
-                "secondary": {},
+                "secondary": {
+                    "model_info": {
+                        "max_input_tokens": 272000
+                    }
+                },
                 "secondary-vision": {},
-                "tertiary": {},
+                "tertiary": {
+                    "model_info": {
+                        "max_input_tokens": 272000
+                    }
+                },
                 "tertiary-vision": {},
                 "gpt-5.5": {},
                 "gpt-5.4": {},
