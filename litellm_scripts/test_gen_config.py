@@ -10,6 +10,31 @@ sys.path.insert(0, str(Path(__file__).parent))
 from gen_config import deep_merge, generate_config, resolve_provider_models, _resolve_alias_group, expand_interface_vars
 
 
+class RepositoryConfigTest(unittest.TestCase):
+    def test_only_primary_models_set_max_input_tokens(self):
+        config_path = Path(__file__).with_name("config.json")
+        config = json.loads(config_path.read_text())
+        config["providers"]["cli-proxy-api"]["api_key"] = "dummy"
+
+        models, _ = resolve_provider_models(
+            config["providers"],
+            config["model_name_base_model_map"],
+        )
+
+        models_with_max_input_tokens = {
+            model["model_name"]: model["model_info"]["max_input_tokens"]
+            for model in models
+            if "max_input_tokens" in model["model_info"]
+        }
+        self.assertEqual(
+            models_with_max_input_tokens,
+            {
+                "anthropic/primary": 272000,
+                "openai/primary": 272000,
+            },
+        )
+
+
 class DeepMergeTest(unittest.TestCase):
     def test_delete_keyword_removes_keys_recursively_and_never_leaks(self):
         merged = deep_merge(

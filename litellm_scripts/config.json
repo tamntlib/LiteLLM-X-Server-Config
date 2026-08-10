@@ -7,13 +7,12 @@
             "access_groups": [
                 "General"
             ],
-            "default_model": {
-                "model_info": {
-                    "max_input_tokens": 272000
-                }
-            },
             "models": {
-                "primary": {},
+                "primary": {
+                    "model_info": {
+                        "max_input_tokens": 272000
+                    }
+                },
                 "primary-vision": {},
                 "secondary": {},
                 "secondary-vision": {},
@@ -27,20 +26,8 @@
                 "anthropic": {},
                 "openai": {
                     "models": {
-                        "gpt-image-2": {
-                            "model_info": {
-                                "$delete": [
-                                    "max_input_tokens"
-                                ]
-                            }
-                        },
-                        "codex-auto-review": {
-                            "model_info": {
-                                "$delete": [
-                                    "max_input_tokens"
-                                ]
-                            }
-                        }
+                        "gpt-image-2": {},
+                        "codex-auto-review": {}
                     }
                 }
             }
