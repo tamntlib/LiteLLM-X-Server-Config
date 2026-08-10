@@ -137,7 +137,7 @@ services:
 
   litellm:
     image: tamntlib/litellm-database
-    command: ["--config", "/app/config.yaml", "--num_workers", "4", "--use_v2_migration_resolver"]
+    command: ["--config", "/app/config.yaml", "--num_workers", "1", "--use_v2_migration_resolver"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@${DB_HOST:-llmproxy-data_db}:5432/${DB_NAME:-app}"
       STORE_MODEL_IN_DB: "True" # allows adding models to proxy via UI

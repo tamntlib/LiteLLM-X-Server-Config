@@ -11,7 +11,7 @@ from gen_config import deep_merge, generate_config, resolve_provider_models, _re
 
 
 class RepositoryConfigTest(unittest.TestCase):
-    def test_non_vision_chat_models_set_max_input_tokens(self):
+    def test_shared_base_model_deployments_set_explicit_max_input_tokens(self):
         config_path = Path(__file__).with_name("config.json")
         config = json.loads(config_path.read_text())
         config["providers"]["cli-proxy-api"]["api_key"] = "dummy"
@@ -30,11 +30,17 @@ class RepositoryConfigTest(unittest.TestCase):
             models_with_max_input_tokens,
             {
                 "anthropic/primary": 272000,
+                "anthropic/primary-vision": 1050000,
                 "anthropic/secondary": 272000,
+                "anthropic/secondary-vision": 1050000,
                 "anthropic/tertiary": 272000,
+                "anthropic/tertiary-vision": 1050000,
                 "openai/primary": 272000,
+                "openai/primary-vision": 1050000,
                 "openai/secondary": 272000,
+                "openai/secondary-vision": 1050000,
                 "openai/tertiary": 272000,
+                "openai/tertiary-vision": 1050000,
             },
         )
 

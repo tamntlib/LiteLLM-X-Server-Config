@@ -13,19 +13,31 @@
                         "max_input_tokens": 272000
                     }
                 },
-                "primary-vision": {},
+                "primary-vision": {
+                    "model_info": {
+                        "max_input_tokens": 1050000
+                    }
+                },
                 "secondary": {
                     "model_info": {
                         "max_input_tokens": 272000
                     }
                 },
-                "secondary-vision": {},
+                "secondary-vision": {
+                    "model_info": {
+                        "max_input_tokens": 1050000
+                    }
+                },
                 "tertiary": {
                     "model_info": {
                         "max_input_tokens": 272000
                     }
                 },
-                "tertiary-vision": {},
+                "tertiary-vision": {
+                    "model_info": {
+                        "max_input_tokens": 1050000
+                    }
+                },
                 "gpt-5.5": {},
                 "gpt-5.4": {},
                 "gpt-5.4-mini": {}
