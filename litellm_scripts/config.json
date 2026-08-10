@@ -8,11 +8,7 @@
                 "General"
             ],
             "models": {
-                "primary": {
-                    "model_info": {
-                        "max_input_tokens": 272000
-                    }
-                },
+                "primary": {},
                 "primary-vision": {},
                 "secondary": {},
                 "secondary-vision": {},

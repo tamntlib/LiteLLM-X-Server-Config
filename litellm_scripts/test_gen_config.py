@@ -11,7 +11,7 @@ from gen_config import deep_merge, generate_config, resolve_provider_models, _re
 
 
 class RepositoryConfigTest(unittest.TestCase):
-    def test_only_primary_models_set_max_input_tokens(self):
+    def test_no_models_set_max_input_tokens(self):
         config_path = Path(__file__).with_name("config.json")
         config = json.loads(config_path.read_text())
         config["providers"]["cli-proxy-api"]["api_key"] = "dummy"
@@ -26,13 +26,7 @@ class RepositoryConfigTest(unittest.TestCase):
             for model in models
             if "max_input_tokens" in model["model_info"]
         }
-        self.assertEqual(
-            models_with_max_input_tokens,
-            {
-                "anthropic/primary": 272000,
-                "openai/primary": 272000,
-            },
-        )
+        self.assertEqual(models_with_max_input_tokens, {})
 
 
 class DeepMergeTest(unittest.TestCase):
