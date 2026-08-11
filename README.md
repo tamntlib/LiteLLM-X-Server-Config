@@ -166,7 +166,62 @@ Optional environment variables used by the stack:
 - `HEADROOM_COMPRESS_ALLOW_REMOTE`: Set to `1` so LiteLLM can call `/v1/compress` from its separate container
 - `SLACK_WEBHOOK_URL`: LiteLLM Slack webhook
 
+#### Optional local-only stack overlay
+
+Files whose names match `*.local*` are gitignored throughout the repository. Use this convention for deployment-specific configuration that must not be committed, for example:
+
+- `llmproxy.local.yaml`: local Docker Swarm stack additions or overrides
+- `configs/litellm.local.yaml`: local config content uploaded as an external Docker config
+
+For example, create `llmproxy.local.yaml` to mount an additional external config into LiteLLM:
+
+```yaml
+services:
+  litellm:
+    configs:
+      - source: litellm-local-config-yaml
+        target: /app/litellm.local.yaml
+
+configs:
+  litellm-local-config-yaml:
+    name: ${LITELLM_LOCAL_CONFIG_NAME:-llmproxy_litellm-local-config-yaml}
+    external: true
+```
+
+Create or update the external config from the local content file:
+
+```sh
+ptctools docker config set \
+  -n "${LITELLM_LOCAL_CONFIG_NAME:-llmproxy_litellm-local-config-yaml}" \
+  -f 'configs/litellm.local.yaml' \
+  --ownership team
+```
+
+If you override `LITELLM_LOCAL_CONFIG_NAME`, export it in the shell before running `config set` and keep the same value in the stack environment. Use `--force` only when replacing an existing Docker config. Then merge the public stack with the local overlay:
+
+```sh
+docker stack config --skip-interpolation \
+  -c 'llmproxy.yaml' \
+  -c 'llmproxy.local.yaml' \
+  > 'llmproxy.gen.yaml'
+```
+
+The base file must come first and the local overlay second. `--skip-interpolation` keeps `${...}` placeholders in the generated file instead of writing resolved environment values into it. Both `llmproxy.local.yaml` and `llmproxy.gen.yaml` are gitignored.
+
+Deploy the generated stack file:
+
+```sh
+ptctools docker stack deploy \
+  -n llmproxy \
+  -f 'llmproxy.gen.yaml' \
+  --ownership team
+```
+
+Because `llmproxy.gen.yaml` remains in the repository root, `ptctools` loads the adjacent `.env` file as usual. Regenerate it whenever either `llmproxy.yaml` or `llmproxy.local.yaml` changes.
+
 #### Upload configs and deploy
+
+The commands below deploy the standard stack without a local overlay. If you use the optional overlay flow above, upload the public configs and deploy `llmproxy-data` as shown, then deploy `llmproxy.gen.yaml` instead of `llmproxy.yaml`.
 
 ```sh
 export PORTAINER_URL=https://portainer.example.com
