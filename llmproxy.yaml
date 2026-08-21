@@ -152,7 +152,7 @@ services:
       LITELLM_DROP_PARAMS: "True"
       CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS:-claude-*}
       CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION:-2.1.140}"
-      LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/primary,anthropic/secondary,anthropic/tertiary,openai/primary,openai/secondary,openai/tertiary}
+      LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/a-0,anthropic/a-1,anthropic/a-2,openai/o-0,openai/o-1,openai/o-2}
       CONTENT_PREVIEW_MAX_LENGTH: ${CONTENT_PREVIEW_MAX_LENGTH:-100}
       USER_TEXT_PREVIEW_MAX_LENGTH: ${USER_TEXT_PREVIEW_MAX_LENGTH:-2048}
     configs:

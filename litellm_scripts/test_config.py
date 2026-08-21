@@ -50,6 +50,50 @@ class AliasSyncTest(ConfigModuleTestMixin, unittest.TestCase):
         post.assert_not_called()
 
 
+class FallbackSyncTest(ConfigModuleTestMixin, unittest.TestCase):
+
+    def test_empty_fallbacks_clear_router_fallbacks(self):
+        with (
+            patch.object(
+                self.config_module,
+                "get_router_settings",
+                return_value={"fallbacks": [{"old": ["backup"]}]},
+            ),
+            patch.object(
+                self.config_module,
+                "post_request",
+                return_value=(True, "ok"),
+            ) as post,
+            patch.object(self.config_module, "get_all_models") as get_all_models,
+            patch.object(self.config_module, "get_current_aliases") as get_aliases,
+        ):
+            success, result = self.config_module.update_fallbacks([])
+
+        self.assertTrue(success)
+        self.assertEqual(result, "ok")
+        post.assert_called_once_with(
+            "config/update",
+            {"router_settings": {"fallbacks": []}},
+        )
+        get_all_models.assert_not_called()
+        get_aliases.assert_not_called()
+
+    def test_empty_fallbacks_skip_when_already_empty(self):
+        with (
+            patch.object(
+                self.config_module,
+                "get_router_settings",
+                return_value={"fallbacks": []},
+            ),
+            patch.object(self.config_module, "post_request") as post,
+        ):
+            success, result = self.config_module.update_fallbacks([])
+
+        self.assertTrue(success)
+        self.assertEqual(result, "skipped")
+        post.assert_not_called()
+
+
 class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
     async def test_sync_models_accepts_manual_model_without_credential_name(self):
         config = {

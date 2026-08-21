@@ -7,45 +7,73 @@
             "access_groups": [
                 "General"
             ],
-            "models": {
-                "primary": {
-                    "model_info": {
-                        "max_input_tokens": 272000
-                    }
-                },
-                "primary-vision": {
-                    "model_info": {
-                        "max_input_tokens": 1050000
-                    }
-                },
-                "secondary": {
-                    "model_info": {
-                        "max_input_tokens": 272000
-                    }
-                },
-                "secondary-vision": {
-                    "model_info": {
-                        "max_input_tokens": 1050000
-                    }
-                },
-                "tertiary": {
-                    "model_info": {
-                        "max_input_tokens": 272000
-                    }
-                },
-                "tertiary-vision": {
-                    "model_info": {
-                        "max_input_tokens": 1050000
-                    }
-                },
-                "gpt-5.5": {},
-                "gpt-5.4": {},
-                "gpt-5.4-mini": {}
-            },
             "interfaces": {
-                "anthropic": {},
+                "anthropic": {
+                    "models": {
+                        "a-0": {
+                            "model_info": {
+                                "max_input_tokens": 300000
+                            }
+                        },
+                        "a-0-vision": {
+                            "model_info": {
+                                "max_input_tokens": 1050000
+                            }
+                        },
+                        "a-1": {
+                            "model_info": {
+                                "max_input_tokens": 300000
+                            }
+                        },
+                        "a-1-vision": {
+                            "model_info": {
+                                "max_input_tokens": 1050000
+                            }
+                        },
+                        "a-2": {
+                            "model_info": {
+                                "max_input_tokens": 300000
+                            }
+                        },
+                        "a-2-vision": {
+                            "model_info": {
+                                "max_input_tokens": 1050000
+                            }
+                        }
+                    }
+                },
                 "openai": {
                     "models": {
+                        "o-0": {
+                            "model_info": {
+                                "max_input_tokens": 300000
+                            }
+                        },
+                        "o-0-vision": {
+                            "model_info": {
+                                "max_input_tokens": 1050000
+                            }
+                        },
+                        "o-1": {
+                            "model_info": {
+                                "max_input_tokens": 300000
+                            }
+                        },
+                        "o-1-vision": {
+                            "model_info": {
+                                "max_input_tokens": 1050000
+                            }
+                        },
+                        "o-2": {
+                            "model_info": {
+                                "max_input_tokens": 300000
+                            }
+                        },
+                        "o-2-vision": {
+                            "model_info": {
+                                "max_input_tokens": 1050000
+                            }
+                        },
                         "gpt-image-2": {},
                         "codex-auto-review": {}
                     }
@@ -55,12 +83,18 @@
     },
     "public_model_hub_aliases_autofill_disabled": true,
     "model_name_base_model_map": {
-        "primary": "gpt-5.6-sol",
-        "primary-vision": "gpt-5.6-sol",
-        "secondary": "gpt-5.6-terra",
-        "secondary-vision": "gpt-5.6-terra",
-        "tertiary": "gpt-5.6-luna",
-        "tertiary-vision": "gpt-5.6-luna"
+        "a-0": "gpt-5.6-sol",
+        "a-0-vision": "gpt-5.6-sol",
+        "a-1": "gpt-5.6-terra",
+        "a-1-vision": "gpt-5.6-terra",
+        "a-2": "gpt-5.6-luna",
+        "a-2-vision": "gpt-5.6-luna",
+        "o-0": "gpt-5.6-sol",
+        "o-0-vision": "gpt-5.6-sol",
+        "o-1": "gpt-5.6-terra",
+        "o-1-vision": "gpt-5.6-terra",
+        "o-2": "gpt-5.6-luna",
+        "o-2-vision": "gpt-5.6-luna"
     },
     "guardrails": {
         "headroom-compression": {
@@ -77,56 +111,17 @@
         }
     },
     "aliases": {
-        "claude-fable-*": "anthropic/primary",
-        "claude-opus-*": "anthropic/primary",
-        "claude-sonnet-*": "anthropic/secondary",
-        "claude-haiku-*": "anthropic/tertiary",
-        "gpt-*": "openai/primary",
-        "gpt-*-sol": "openai/primary",
-        "gpt-*-terra": "openai/secondary",
-        "gpt-*-luna": "openai/tertiary",
-        "gpt-*-mini": "openai/gpt-5.4-mini",
+        "claude-fable-*": "anthropic/a-0",
+        "claude-opus-*": "anthropic/a-0",
+        "claude-sonnet-*": "anthropic/a-1",
+        "claude-haiku-*": "anthropic/a-2",
+        "gpt-*": "openai/o-0",
+        "gpt-*-sol": "openai/o-0",
+        "gpt-*-terra": "openai/o-1",
+        "gpt-*-luna": "openai/o-2",
         "gpt-image-*": "openai/gpt-image-2",
         "codex-auto-review": "openai/codex-auto-review"
     },
-    "fallbacks": [
-        {
-            "$interface/primary": [
-                "$interface/secondary",
-                "$interface/tertiary"
-            ]
-        },
-        {
-            "$interface/secondary": [
-                "$interface/primary",
-                "$interface/tertiary"
-            ]
-        },
-        {
-            "$interface/tertiary": [
-                "$interface/primary",
-                "$interface/secondary"
-            ]
-        },
-        {
-            "$interface/primary-vision": [
-                "$interface/secondary-vision",
-                "$interface/tertiary-vision"
-            ]
-        },
-        {
-            "$interface/secondary-vision": [
-                "$interface/primary-vision",
-                "$interface/tertiary-vision"
-            ]
-        },
-        {
-            "$interface/tertiary-vision": [
-                "$interface/primary-vision",
-                "$interface/secondary-vision"
-            ]
-        }
-    ],
     "router_settings": {
         "cooldown_time": 0,
         "num_retries": 1,

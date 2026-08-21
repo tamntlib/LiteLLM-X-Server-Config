@@ -29,20 +29,37 @@ class RepositoryConfigTest(unittest.TestCase):
         self.assertEqual(
             models_with_max_input_tokens,
             {
-                "anthropic/primary": 272000,
-                "anthropic/primary-vision": 1050000,
-                "anthropic/secondary": 272000,
-                "anthropic/secondary-vision": 1050000,
-                "anthropic/tertiary": 272000,
-                "anthropic/tertiary-vision": 1050000,
-                "openai/primary": 272000,
-                "openai/primary-vision": 1050000,
-                "openai/secondary": 272000,
-                "openai/secondary-vision": 1050000,
-                "openai/tertiary": 272000,
-                "openai/tertiary-vision": 1050000,
+                "anthropic/a-0": 300000,
+                "anthropic/a-0-vision": 1050000,
+                "anthropic/a-1": 300000,
+                "anthropic/a-1-vision": 1050000,
+                "anthropic/a-2": 300000,
+                "anthropic/a-2-vision": 1050000,
+                "openai/o-0": 300000,
+                "openai/o-0-vision": 1050000,
+                "openai/o-1": 300000,
+                "openai/o-1-vision": 1050000,
+                "openai/o-2": 300000,
+                "openai/o-2-vision": 1050000,
             },
         )
+
+    def test_legacy_direct_gpt_models_and_mini_alias_are_removed(self):
+        config_path = Path(__file__).with_name("config.json")
+        config = json.loads(config_path.read_text())
+        config["providers"]["cli-proxy-api"]["api_key"] = "dummy"
+
+        models, _ = resolve_provider_models(
+            config["providers"],
+            config["model_name_base_model_map"],
+        )
+        model_names = {model["model_name"] for model in models}
+
+        for interface in ("anthropic", "openai"):
+            self.assertNotIn(f"{interface}/gpt-5.5", model_names)
+            self.assertNotIn(f"{interface}/gpt-5.4", model_names)
+            self.assertNotIn(f"{interface}/gpt-5.4-mini", model_names)
+        self.assertNotIn("gpt-*-mini", config["aliases"])
 
 
 class DeepMergeTest(unittest.TestCase):

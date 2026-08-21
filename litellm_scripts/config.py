@@ -420,10 +420,6 @@ def get_current_fallbacks():
 
 
 def update_fallbacks(fallbacks: list, force=False):
-    if not fallbacks:
-        logger.info("No fallbacks to update")
-        return True, "no fallbacks"
-
     current_fallbacks = get_current_fallbacks()
 
     if not force and current_fallbacks == fallbacks:
@@ -434,10 +430,11 @@ def update_fallbacks(fallbacks: list, force=False):
 
     if success:
         logger.info(f"✅ Updated {len(fallbacks)} fallback rules")
-        # Validate fallbacks reference existing models or aliases
-        existing_models = {model["model_name"] for model in get_all_models()}
-        current_aliases = get_current_aliases()
-        validate_fallbacks(fallbacks, existing_models, current_aliases)
+        if fallbacks:
+            # Validate fallbacks reference existing models or aliases
+            existing_models = {model["model_name"] for model in get_all_models()}
+            current_aliases = get_current_aliases()
+            validate_fallbacks(fallbacks, existing_models, current_aliases)
     else:
         logger.error(f"❌ Failed to update fallbacks: {result}")
 
