@@ -10,70 +10,22 @@
             "interfaces": {
                 "anthropic": {
                     "models": {
-                        "a-0": {
-                            "model_info": {
-                                "max_input_tokens": 300000
-                            }
-                        },
-                        "a-0-vision": {
-                            "model_info": {
-                                "max_input_tokens": 1050000
-                            }
-                        },
-                        "a-1": {
-                            "model_info": {
-                                "max_input_tokens": 300000
-                            }
-                        },
-                        "a-1-vision": {
-                            "model_info": {
-                                "max_input_tokens": 1050000
-                            }
-                        },
-                        "a-2": {
-                            "model_info": {
-                                "max_input_tokens": 300000
-                            }
-                        },
-                        "a-2-vision": {
-                            "model_info": {
-                                "max_input_tokens": 1050000
-                            }
-                        }
+                        "a-0": {},
+                        "a-0-vision": {},
+                        "a-1": {},
+                        "a-1-vision": {},
+                        "a-2": {},
+                        "a-2-vision": {}
                     }
                 },
                 "openai": {
                     "models": {
-                        "o-0": {
-                            "model_info": {
-                                "max_input_tokens": 300000
-                            }
-                        },
-                        "o-0-vision": {
-                            "model_info": {
-                                "max_input_tokens": 1050000
-                            }
-                        },
-                        "o-1": {
-                            "model_info": {
-                                "max_input_tokens": 300000
-                            }
-                        },
-                        "o-1-vision": {
-                            "model_info": {
-                                "max_input_tokens": 1050000
-                            }
-                        },
-                        "o-2": {
-                            "model_info": {
-                                "max_input_tokens": 300000
-                            }
-                        },
-                        "o-2-vision": {
-                            "model_info": {
-                                "max_input_tokens": 1050000
-                            }
-                        },
+                        "o-0": {},
+                        "o-0-vision": {},
+                        "o-1": {},
+                        "o-1-vision": {},
+                        "o-2": {},
+                        "o-2-vision": {},
                         "gpt-image-2": {},
                         "codex-auto-review": {}
                     }
