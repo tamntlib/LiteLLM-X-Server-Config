@@ -2,3 +2,13 @@ general_settings:
   proxy_batch_write_at: 60 # Batch write spend updates every 60s
   database_connection_pool_limit: 10 # connection pool limit per worker process. Total connections = limit × workers × instances. Calculate: MAX_DB_CONNECTIONS / (instances × workers). Default: 10.
   disable_budget_reservation: true
+
+litellm_settings:
+  callbacks: ["s3_v2"]
+  cold_storage_custom_logger: "s3_v2"
+  s3_callback_params:
+    s3_bucket_name: "os.environ/LITELLM_LOGGER_S3_BUCKET"
+    s3_region_name: "os.environ/LITELLM_LOGGER_S3_REGION"
+    s3_path: "os.environ/LITELLM_LOGGER_S3_PATH"
+    s3_aws_access_key_id: "os.environ/LITELLM_LOGGER_AWS_ACCESS_KEY_ID"
+    s3_aws_secret_access_key: "os.environ/LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY"

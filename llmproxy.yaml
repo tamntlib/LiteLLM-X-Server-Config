@@ -2,6 +2,7 @@
 volumes:
   cli-proxy-api-auth-data:
   cli-proxy-api-config-data:
+  cli-proxy-api-plugins-data:
   cli-proxy-api-usage-data:
   headroom-data:
 
@@ -57,8 +58,9 @@ services:
   cli-proxy-api:
     <<: *cli-proxy-api
     volumes:
-      - cli-proxy-api-config-data:/CLIProxyAPI/config
       - cli-proxy-api-auth-data:/CLIProxyAPI/auth
+      - cli-proxy-api-config-data:/CLIProxyAPI/config
+      - cli-proxy-api-plugins-data:/CLIProxyAPI/plugins
     configs:
       - source: cli-proxy-api-config-yaml
         target: /CLIProxyAPI/config_ro/config.yaml
@@ -147,14 +149,17 @@ services:
       LITELLM_LICENSE: ${LITELLM_LICENSE:-}
       LITELLM_MODE: PRODUCTION
       LITELLM_LOG: ERROR
+      LITELLM_LOGGER_S3_BUCKET: ${LITELLM_LOGGER_S3_BUCKET:-}
+      LITELLM_LOGGER_S3_REGION: ${LITELLM_LOGGER_S3_REGION:-}
+      LITELLM_LOGGER_S3_PATH: ${LITELLM_LOGGER_S3_PATH:-}
+      LITELLM_LOGGER_AWS_ACCESS_KEY_ID: ${LITELLM_LOGGER_AWS_ACCESS_KEY_ID:-}
+      LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY: ${LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY:-}
       JSON_LOGS: "True"
       USE_PRISMA_MIGRATE: "True"
       LITELLM_DROP_PARAMS: "True"
       CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS:-claude-*}
       CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION:-2.1.140}"
       LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/a-0,anthropic/a-1,anthropic/a-2,openai/o-0,openai/o-1,openai/o-2}
-      CONTENT_PREVIEW_MAX_LENGTH: ${CONTENT_PREVIEW_MAX_LENGTH:-100}
-      USER_TEXT_PREVIEW_MAX_LENGTH: ${USER_TEXT_PREVIEW_MAX_LENGTH:-2048}
     configs:
       - source: litellm-config-yaml
         target: /app/config.yaml
