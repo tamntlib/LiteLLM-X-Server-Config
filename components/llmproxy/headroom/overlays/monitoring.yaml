@@ -1,0 +1,8 @@
+services:
+  headroom:
+    networks:
+      - monitoring
+networks:
+  monitoring:
+    name: ${MONITORING_NETWORK:-monitoring}
+    external: true

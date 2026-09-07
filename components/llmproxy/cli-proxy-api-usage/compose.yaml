@@ -1,0 +1,37 @@
+services:
+  cli-proxy-api-usage:
+    image: ghcr.io/willxup/cpa-usage-keeper
+    environment:
+      TZ: ${TZ:-UTC}
+      CPA_BASE_URL: http://cli-proxy-api:8317
+      CPA_MANAGEMENT_KEY: ${CLI_PROXY_API_MANAGEMENT_KEY}
+      REDIS_QUEUE_ADDR: cli-proxy-api:8317
+      AUTH_ENABLED: ${CLI_PROXY_API_USAGE_AUTH_ENABLED:-true}
+      LOGIN_PASSWORD: ${CLI_PROXY_API_USAGE_LOGIN_PASSWORD}
+    volumes:
+      - cli-proxy-api-usage-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+volumes:
+  cli-proxy-api-usage-data:
+networks:
+  internal:
+    name: ${INTERNAL_NETWORK:-llmproxy}
+    external: true

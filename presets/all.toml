@@ -1,0 +1,4 @@
+description = "Current full topology with Traefik and monitoring attachments"
+extends = "llmproxy"
+components = ["monitoring/netdata"]
+features = ["monitoring"]

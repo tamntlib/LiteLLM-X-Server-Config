@@ -1,0 +1,423 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://example.com/litellm-config.schema.json",
+    "title": "LiteLLM Config Schema",
+    "description": "Configuration schema for LiteLLM-X-Server-Config management script",
+    "type": "object",
+    "properties": {
+        "$schema": {
+            "type": "string",
+            "description": "JSON Schema reference"
+        },
+        "$delete": {
+            "$ref": "#/$defs/delete_keys"
+        },
+        "providers": {
+            "type": "object",
+            "description": "Service providers configuration",
+            "additionalProperties": {
+                "$ref": "#/$defs/provider"
+            }
+        },
+        "credentials": {
+            "type": ["array", "null"],
+            "description": "Resolved LiteLLM credential request bodies, or null to leave credentials unchanged",
+            "items": {
+                "type": "object",
+                "required": ["credential_name", "credential_values"],
+                "properties": {
+                    "credential_name": {"type": "string", "minLength": 1},
+                    "credential_values": {"type": "object"},
+                    "credential_info": {"type": "object"}
+                },
+                "additionalProperties": true
+            }
+        },
+        "models": {
+            "type": ["array", "null"],
+            "description": "Manual LiteLLM /model/new payloads to append to generated provider and alias models. Use this for router models or other LiteLLM-native model groups that do not belong to a credentialed provider.",
+            "items": {
+                "$ref": "#/$defs/manual_model"
+            }
+        },
+        "model_aliases": {
+            "type": "object",
+            "description": "Model group aliases that expand into LiteLLM model entries. Keys are exposed model group names; values map target LiteLLM model literals to per-target overrides. Use '$extends' to inherit targets from other alias groups. Use '$interface/' prefix in keys and targets to expand across all interfaces (e.g. '$interface/secondary' becomes 'anthropic/secondary', 'openai/secondary').",
+            "additionalProperties": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                    "$extends": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "description": "Inherit targets from another model_aliases group"
+                            },
+                            {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "Inherit targets from multiple model_aliases groups"
+                            }
+                        ],
+                        "description": "Inherit targets from one or more other model_aliases groups. Local targets override inherited ones."
+                    }
+                },
+                "additionalProperties": {
+                    "$ref": "#/$defs/model"
+                }
+            }
+        },
+        "aliases": {
+            "type": ["object", "null"],
+            "description": "Model name aliases mapping. Keys can be literal alias names or '$models:<service>/<interface>' refs that expand into one alias per model in that provider/interface (raw model name -> prefixed model name).",
+            "additionalProperties": {
+                "type": "string",
+                "description": "Target model name, another alias, or empty string (for $models: refs, empty means use the prefixed model name)"
+            }
+        },
+        "fallbacks": {
+            "type": ["array", "null"],
+            "description": "Fallback rules for automatic routing on failure. Keys and fallback targets can use '$interface/' to expand across all configured interfaces, matching model_aliases behavior.",
+            "items": {
+                "type": "object",
+                "description": "Fallback rule mapping source model to fallback targets. Source keys can use '$interface/' (e.g. '$interface/primary') to expand once per configured interface.",
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "Fallback model name, '$interface/<name>' resolved from the source key interface, or '$base' to expand base config fallbacks for this key"
+                    },
+                    "description": "List of fallback model names. Use '$base' to reference base config fallbacks."
+                }
+            }
+        },
+        "public_model_hub": {
+            "type": ["array", "null"],
+            "description": "List of model group names or aliases to expose in LiteLLM public model hub",
+            "items": {
+                "type": "string"
+            }
+        },
+        "public_model_hub_autofill_disabled": {
+            "type": "boolean",
+            "description": "Disable autofilling public_model_hub from derived model defaults"
+        },
+        "public_model_hub_aliases_autofill_enabled": {
+            "type": "boolean",
+            "description": "Explicitly enable autofilling public_model_hub from aliases when public_model_hub is omitted"
+        },
+        "model_name_base_model_map": {
+            "type": "object",
+            "description": "Global mapping of model names to base_model identifiers. Used as fallback when a model does not specify its own base_model.",
+            "additionalProperties": {
+                "type": "string",
+                "description": "Base model identifier (e.g. 'anthropic/claude-opus-4-6')"
+            }
+        },
+        "guardrails": {
+            "type": ["object", "array"],
+            "description": "LiteLLM guardrails keyed by guardrail_name and managed through the guardrail management API.",
+            "propertyNames": {
+                "minLength": 1
+            },
+            "additionalProperties": {
+                "$ref": "#/$defs/guardrail"
+            },
+            "items": {
+                "$ref": "#/$defs/expanded_guardrail"
+            }
+        },
+        "router_settings": {
+            "type": "object",
+            "description": "Raw router settings to merge into LiteLLM's /config/update router_settings. Applied after aliases and fallbacks.",
+            "additionalProperties": true
+        }
+    },
+    "$defs": {
+        "delete_keys": {
+            "type": "array",
+            "description": "Reserved deep-merge directive listing inherited keys to remove from the current object.",
+            "items": {
+                "type": "string"
+            },
+            "uniqueItems": true
+        },
+        "guardrail": {
+            "type": "object",
+            "description": "LiteLLM guardrail configuration. guardrail_name is supplied by the parent object key.",
+            "required": [
+                "litellm_params"
+            ],
+            "properties": {
+                "litellm_params": {
+                    "type": "object",
+                    "required": [
+                        "guardrail",
+                        "mode"
+                    ],
+                    "properties": {
+                        "guardrail": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "mode": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "minItems": 1
+                                }
+                            ]
+                        },
+                        "default_on": {
+                            "type": "boolean"
+                        },
+                        "api_base": {
+                            "type": "string"
+                        },
+                        "api_key": {
+                            "type": "string"
+                        },
+                        "model": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": true
+                },
+                "guardrail_info": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            },
+            "additionalProperties": true
+        },
+        "expanded_guardrail": {
+            "allOf": [
+                {
+                    "$ref": "#/$defs/guardrail"
+                },
+                {
+                    "type": "object",
+                    "required": ["guardrail_name"],
+                    "properties": {
+                        "guardrail_name": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            ]
+        },
+        "manual_model": {
+            "type": "object",
+            "description": "Manual LiteLLM model payload appended directly to generated config output.",
+            "required": [
+                "model_name",
+                "litellm_params"
+            ],
+            "properties": {
+                "model_name": {
+                    "type": "string",
+                    "description": "LiteLLM model group name to expose."
+                },
+                "litellm_params": {
+                    "type": "object",
+                    "description": "LiteLLM params for this model. Must include the LiteLLM model identifier.",
+                    "required": [
+                        "model"
+                    ],
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "LiteLLM model identifier, e.g. auto_router/complexity_router."
+                        }
+                    },
+                    "additionalProperties": true
+                },
+                "model_info": {
+                    "type": "object",
+                    "description": "LiteLLM model metadata such as access_groups or base_model.",
+                    "additionalProperties": true
+                }
+            },
+            "additionalProperties": true
+        },
+        "provider": {
+            "type": "object",
+            "description": "Provider configuration",
+            "properties": {
+                "$extend": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Inherit configuration from another provider. Set to null to remove inheritance."
+                },
+                "api_key": {
+                    "type": "string",
+                    "description": "API key for authentication (typically in config.local.json)"
+                },
+                "api_base": {
+                    "type": "string",
+                    "description": "Base URL for the API endpoint"
+                },
+                "models_api_base": {
+                    "type": "string",
+                    "description": "Base URL for the /models listing endpoint (defaults to api_base if not specified)"
+                },
+                "access_groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Access groups for model visibility"
+                },
+                "is_public_model_hub": {
+                    "type": "boolean",
+                    "description": "Default public model hub visibility for all models under this provider"
+                },
+                "default_model": {
+                    "$ref": "#/$defs/model",
+                    "description": "Default model configuration deep-merged into every explicit or auto-discovered model under this provider. Model-specific and per-name settings take precedence."
+                },
+                "models": {
+                    "type": "object",
+                    "description": "Default models for all interfaces under this provider. Interface-level models override/extend these.",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/model"
+                    }
+                },
+                "models_autofill_disabled": {
+                    "type": "boolean",
+                    "description": "Default for all interfaces under this provider. Set to true to disable auto-fetching models from the provider's API. Interface-level setting overrides this. Autofill is enabled by default."
+                },
+                "interfaces": {
+                    "type": "object",
+                    "description": "Provider interfaces (openai, gemini, anthropic). May be supplied by config layers or $extend; strict generation requires this field after inheritance resolves. An empty resolved object explicitly disables interfaces, but an empty override does not clear inherited entries because objects deep-merge. Incomplete templates remain valid for non-strict generation.",
+                    "properties": {
+                        "openai": {
+                            "$ref": "#/$defs/interface"
+                        },
+                        "gemini": {
+                            "$ref": "#/$defs/interface"
+                        },
+                        "anthropic": {
+                            "$ref": "#/$defs/interface"
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
+        "interface": {
+            "type": "object",
+            "description": "Interface-specific configuration",
+            "properties": {
+                "$delete": {
+                    "$ref": "#/$defs/delete_keys"
+                },
+                "api_base": {
+                    "type": "string",
+                    "description": "Base URL override for this interface. Defaults to the provider-level api_base."
+                },
+                "models_api_base": {
+                    "type": "string",
+                    "description": "Base URL override for this interface's /models listing endpoint. Defaults to interface api_base, then provider-level models_api_base, then provider-level api_base."
+                },
+                "models_autofill_disabled": {
+                    "type": "boolean",
+                    "description": "Set to true to disable auto-fetching models from the provider's API. Autofill is enabled by default."
+                },
+                "model_name_prefix": {
+                    "type": "string",
+                    "description": "Literal prefix for derived model group names on this interface. Defaults to '{interface}/' (e.g. 'openai/', 'anthropic/') when omitted. Set to empty string to disable prefixing."
+                },
+                "models": {
+                    "type": "object",
+                    "description": "Models available through this interface",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/model"
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "model": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "description": "Model configuration",
+                    "properties": {
+                        "$delete": {
+                            "$ref": "#/$defs/delete_keys"
+                        },
+                        "ignored": {
+                            "type": "boolean",
+                            "description": "If true, skip exposing this model completely."
+                        },
+                        "model_names": {
+                            "oneOf": [
+                                {
+                                    "type": "string",
+                                    "description": "Comma-separated model group names. Leading comma includes the derived model name. Defaults to the key if not specified."
+                                },
+                                {
+                                    "type": "object",
+                                    "description": "Map of model group names to per-name overrides. Use \"$self\" for the derived model name.",
+                                    "additionalProperties": {
+                                        "$ref": "#/$defs/model"
+                                    }
+                                }
+                            ]
+                        },
+                        "model_name_prefix": {
+                            "type": "string",
+                            "description": "Override the derived model name prefix for this model. Takes precedence over interface-level model_name_prefix. Can also be set per entry in the object form of model_names."
+                        },
+                        "access_groups": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Access groups for this model (overrides provider-level access_groups)"
+                        },
+                        "is_public_model_hub": {
+                            "type": "boolean",
+                            "description": "Whether this model should be exposed in LiteLLM's public model hub (overrides provider-level default)"
+                        },
+                        "model_info": {
+                            "type": "object",
+                            "description": "Model metadata",
+                            "properties": {
+                                "base_model": {
+                                    "type": "string",
+                                    "description": "Base model identifier for pricing/capabilities lookup"
+                                }
+                            },
+                            "additionalProperties": true
+                        },
+                        "litellm_params": {
+                            "type": "object",
+                            "description": "Additional LiteLLM parameters",
+                            "additionalProperties": true
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "null",
+                    "description": "Empty model config (use defaults)"
+                }
+            ]
+        }
+    },
+    "additionalProperties": false
+}

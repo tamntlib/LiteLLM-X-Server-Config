@@ -1,0 +1,8 @@
+required_files = ["configs/netdata.conf"]
+required_environment = ["NETDATA_HOST", "NETDATA_BASIC_AUTH"]
+required_features = ["traefik"]
+
+[[docker_configs]]
+source = "configs/netdata.conf"
+name = "monitoring_netdata-conf"
+environment = "NETDATA_CONF_NAME"

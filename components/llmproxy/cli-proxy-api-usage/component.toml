@@ -1,0 +1,2 @@
+requires = ["llmproxy/cli-proxy-api"]
+required_environment = ["CLI_PROXY_API_USAGE_LOGIN_PASSWORD"]

@@ -1,0 +1,3 @@
+description = "Portainer, Portainer Agent, and their dedicated Traefik ingress"
+components = ["portainer/portainer"]
+features = []

@@ -1,0 +1,16 @@
+{
+  "guardrails": {
+    "headroom-compression": {
+      "litellm_params": {
+        "guardrail": "headroom",
+        "mode": "pre_call",
+        "default_on": true,
+        "api_base": "http://headroom:8787",
+        "unreachable_fallback": "fail_open"
+      },
+      "guardrail_info": {
+        "description": "Global Headroom prompt compression"
+      }
+    }
+  }
+}

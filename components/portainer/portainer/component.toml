@@ -1,0 +1,1 @@
+required_environment = ["PORTAINER_HOST", "CF_DNS_API_TOKEN", "LETSENCRYPT_EMAIL"]

@@ -1,0 +1,22 @@
+services:
+  headroom:
+    networks:
+      - public
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.docker.network: ${PUBLIC_NETWORK:-public}
+        traefik.http.routers.headroom-dashboard.rule: Host(`${HEADROOM_HOST}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/stats`) || Path(`/health`) || Path(`/favicon.ico`))
+        traefik.http.routers.headroom-dashboard.entrypoints: ${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}
+        traefik.http.routers.headroom-dashboard.tls: ${TRAEFIK_ROUTER_TLS:-true}
+        traefik.http.routers.headroom-dashboard.tls.certresolver: ${LETSENCRYPT_RESOLVER:-le}
+        traefik.http.routers.headroom-dashboard.service: headroom-dashboard
+        traefik.http.services.headroom-dashboard.loadbalancer.server.port: "8787"
+        traefik.http.routers.headroom-dashboard.middlewares: headroom-dashboard-auth,headroom-dashboard-token
+        traefik.http.middlewares.headroom-dashboard-auth.basicauth.users: ${HEADROOM_BASIC_AUTH}
+        traefik.http.middlewares.headroom-dashboard-auth.basicauth.removeheader: "true"
+        traefik.http.middlewares.headroom-dashboard-token.headers.customrequestheaders.X-Headroom-Proxy-Token: ${HEADROOM_API_KEY}
+networks:
+  public:
+    name: ${PUBLIC_NETWORK:-public}
+    external: true

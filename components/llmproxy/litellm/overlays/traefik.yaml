@@ -1,0 +1,17 @@
+services:
+  litellm:
+    networks:
+      - public
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.http.routers.litellm.rule: Host(`${LITELLM_HOST}`)
+        traefik.http.routers.litellm.entrypoints: ${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}
+        traefik.http.routers.litellm.tls: ${TRAEFIK_ROUTER_TLS:-true}
+        traefik.http.routers.litellm.tls.certresolver: ${LETSENCRYPT_RESOLVER:-le}
+        traefik.http.services.litellm.loadbalancer.server.port: "4000"
+        traefik.http.routers.litellm.service: litellm
+networks:
+  public:
+    name: ${PUBLIC_NETWORK:-public}
+    external: true

@@ -1,0 +1,6 @@
+# Copy to headroom.local.yaml and customize locally.
+# Put values in the single root .env instead of hard-coding secrets here.
+services:
+  headroom:
+    environment:
+      HEADROOM_TELEMETRY: ${HEADROOM_TELEMETRY:-off}

@@ -1,0 +1,7 @@
+description = "Complete LLM proxy application stack without monitoring attachments"
+extends = "litellm-traefik"
+components = [
+  "llmproxy/cli-proxy-api",
+  "llmproxy/cli-proxy-api-usage",
+  "llmproxy/headroom",
+]

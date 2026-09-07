@@ -1,0 +1,17 @@
+services:
+  cli-proxy-api-usage:
+    networks:
+      - public
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.http.routers.cli-proxy-api-usage.rule: Host(`${CLI_PROXY_API_USAGE_HOST}`)
+        traefik.http.routers.cli-proxy-api-usage.entrypoints: ${TRAEFIK_ROUTER_ENTRYPOINTS:-websecure}
+        traefik.http.routers.cli-proxy-api-usage.tls: ${TRAEFIK_ROUTER_TLS:-true}
+        traefik.http.routers.cli-proxy-api-usage.tls.certresolver: ${LETSENCRYPT_RESOLVER:-le}
+        traefik.http.services.cli-proxy-api-usage.loadbalancer.server.port: "8080"
+        traefik.http.routers.cli-proxy-api-usage.service: cli-proxy-api-usage
+networks:
+  public:
+    name: ${PUBLIC_NETWORK:-public}
+    external: true

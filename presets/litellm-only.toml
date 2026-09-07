@@ -1,0 +1,6 @@
+description = "PostgreSQL and LiteLLM without public ingress"
+components = [
+  "llmproxy-data/postgres",
+  "llmproxy/litellm",
+]
+features = []

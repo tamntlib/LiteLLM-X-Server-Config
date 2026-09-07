@@ -1,0 +1,53 @@
+services:
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -f /CLIProxyAPI/config/config.yaml ]; then
+          cp /CLIProxyAPI/config_ro/config.yaml /CLIProxyAPI/config/config.yaml
+        fi
+        exec ./CLIProxyAPI --config /CLIProxyAPI/config/config.yaml
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - cli-proxy-api-auth-data:/CLIProxyAPI/auth
+      - cli-proxy-api-config-data:/CLIProxyAPI/config
+      - cli-proxy-api-plugins-data:/CLIProxyAPI/plugins
+    configs:
+      - source: cli-proxy-api-config-yaml
+        target: /CLIProxyAPI/config_ro/config.yaml
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8317 && printf \"GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && read -r status <&3 && [[ \"$$status\" == HTTP/*\" 2\"* || \"$$status\" == HTTP/*\" 3\"* ]]'"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+volumes:
+  cli-proxy-api-auth-data:
+  cli-proxy-api-config-data:
+  cli-proxy-api-plugins-data:
+configs:
+  cli-proxy-api-config-yaml:
+    name: ${CLI_PROXY_API_CONFIG_NAME:-llmproxy_cli-proxy-api-config-yaml}
+    external: true
+networks:
+  internal:
+    name: ${INTERNAL_NETWORK:-llmproxy}
+    external: true

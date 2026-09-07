@@ -1,0 +1,55 @@
+services:
+  litellm:
+    image: tamntlib/litellm-database
+    command: ["--config", "/app/config.yaml", "--num_workers", "1", "--use_v2_migration_resolver"]
+    environment:
+      DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@${DB_HOST:-llmproxy-data_db}:5432/${DB_NAME:-app}"
+      STORE_MODEL_IN_DB: "True"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-litellm_master_key}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-litellm_salt_key}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      LITELLM_LICENSE: ${LITELLM_LICENSE:-}
+      LITELLM_MODE: PRODUCTION
+      LITELLM_LOG: ERROR
+      LITELLM_LOGGER_S3_BUCKET: ${LITELLM_LOGGER_S3_BUCKET:-}
+      LITELLM_LOGGER_S3_REGION: ${LITELLM_LOGGER_S3_REGION:-}
+      LITELLM_LOGGER_S3_PATH: ${LITELLM_LOGGER_S3_PATH:-}
+      LITELLM_LOGGER_AWS_ACCESS_KEY_ID: ${LITELLM_LOGGER_AWS_ACCESS_KEY_ID:-}
+      LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY: ${LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY:-}
+      JSON_LOGS: "True"
+      USE_PRISMA_MIGRATE: "True"
+      LITELLM_DROP_PARAMS: "True"
+      LITELLM_DISABLE_NO_REDIS_WARNING: "${LITELLM_DISABLE_NO_REDIS_WARNING:-true}"
+      CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS:-claude-*}
+      CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION:-2.1.140}"
+      LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/a-0,anthropic/a-1,anthropic/a-2,openai/o-0,openai/o-1,openai/o-2}
+    configs:
+      - source: litellm-config-yaml
+        target: /app/config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+configs:
+  litellm-config-yaml:
+    name: ${LITELLM_CONFIG_NAME:-llmproxy_litellm-config-yaml}
+    external: true
+networks:
+  internal:
+    name: ${INTERNAL_NETWORK:-llmproxy}
+    external: true

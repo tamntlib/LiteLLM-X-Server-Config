@@ -1,0 +1,9 @@
+{
+  "$schema": "./config.schema.json",
+  "providers": {},
+  "router_settings": {
+    "cooldown_time": 0,
+    "num_retries": 1,
+    "timeout": 600
+  }
+}

@@ -1,0 +1,8 @@
+requires = ["llmproxy-data/postgres"]
+required_files = ["configs/litellm.yaml"]
+required_environment = ["DB_PASSWORD", "LITELLM_MASTER_KEY", "LITELLM_SALT_KEY"]
+
+[[docker_configs]]
+source = "configs/litellm.yaml"
+name = "llmproxy_litellm-config-yaml"
+environment = "LITELLM_CONFIG_NAME"

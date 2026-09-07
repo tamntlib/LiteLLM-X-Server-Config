@@ -1,0 +1,8 @@
+# Copy to compose.local.yaml in this directory and customize locally.
+services:
+  litellm:
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G

@@ -1,0 +1,7 @@
+required_files = ["configs/config.local.yaml"]
+required_environment = ["CLI_PROXY_API_MANAGEMENT_KEY"]
+
+[[docker_configs]]
+source = "configs/config.local.yaml"
+name = "llmproxy_cli-proxy-api-config-yaml"
+environment = "CLI_PROXY_API_CONFIG_NAME"

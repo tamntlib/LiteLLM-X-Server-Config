@@ -1,0 +1,7 @@
+services:
+  litellm:
+    ports:
+      - target: 4000
+        published: 4000
+        protocol: tcp
+        mode: ingress
