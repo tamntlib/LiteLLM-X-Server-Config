@@ -57,7 +57,7 @@ class KeyLimitOverrideTest(unittest.TestCase):
             load.assert_called_once_with(root, "llmproxy/litellm", "src.key_limits")
             kwargs = dict(module.set_key_limits.call_args.kwargs)
             report = kwargs.pop("report")
-            self.assertEqual(kwargs, dict(CREDENTIALS, config_path=limits, rpm_limit=100, max_budget=700, budget_duration="7d", page_size=100, reset_spend=False, apply=False))
+            self.assertEqual(kwargs, dict(CREDENTIALS, config_path=limits, rpm_limit=100, max_budget=700, budget_duration="7d", page_size=100, reset_spend=False, apply=True))
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 report("progress")
@@ -464,7 +464,7 @@ class KeyLimitsContractTest(unittest.TestCase):
                 self.assertEqual(update_api_key_limits.set_key_limits(config_path=config, report=reports.append, **CREDENTIALS), 0)
         request.assert_called_once()
         self.assertEqual(request.call_args.kwargs["method"], "GET")
-        self.assertEqual(reports, ["DRY RUN: set default_rpm_limit=100, default_max_budget=700, key_limit_overrides=1, budget_duration=7d for 1 all key(s) minus exclusions.", "Would update key-a (sk-a): rpm_limit=200, max_budget=900", "Add --apply to apply these changes."])
+        self.assertEqual(reports, ["DRY RUN: set default_rpm_limit=100, default_max_budget=700, key_limit_overrides=1, budget_duration=7d for 1 all key(s) minus exclusions.", "Would update key-a (sk-a): rpm_limit=200, max_budget=900", "Run without --dry-run to apply these changes."])
 
     def test_inventory_errors_keep_domain_messages(self):
         failures = [(ValueError("invalid inventory"), "Invalid target/excluded keys: invalid inventory"), (urllib.error.HTTPError("http://litellm.test/key/list", 403, "Forbidden", {}, None), "Failed to list API keys:")]
@@ -475,6 +475,40 @@ class KeyLimitsContractTest(unittest.TestCase):
 
 
 class KeyLimitsIsolationTest(unittest.TestCase):
+    def test_cli_modes_control_actual_backend_writes(self):
+        from llmproxy.cli import create_parser
+
+        root = Path(__file__).resolve().parents[4]
+        parser = create_parser(root)
+        for prefix in (["llmproxy/litellm", "key-limits"], ["key", "limits"]):
+            for flags, apply in (([], True), (["--dry-run"], False)):
+                with self.subTest(prefix=prefix, flags=flags), tempfile.TemporaryDirectory() as tmpdir:
+                    component_dir = Path(tmpdir)
+                    (component_dir / "configs").mkdir()
+                    (component_dir / "configs" / "key-limits.json").write_text("{}")
+                    args = parser.parse_args([*prefix, "--max-budget", "700", *flags])
+                    with (
+                        patch.dict(os.environ, DUMMY_MANAGEMENT_ENV),
+                        patch.object(command, "load_dotenv"),
+                        patch.object(command, "load_component_module", return_value=update_api_key_limits),
+                        patch.object(update_api_key_limits, "request_json", side_effect=[{"keys": [{"token": "synthetic-key"}]}, {}]) as request,
+                        redirect_stderr(io.StringIO()),
+                    ):
+                        self.assertEqual(command.run(args, SimpleNamespace(root=component_dir, component_dir=component_dir)), 0)
+                    self.assertEqual([call.kwargs["method"] for call in request.call_args_list], ["GET", "POST"] if apply else ["GET"])
+                    if apply:
+                        self.assertEqual(json.loads(request.call_args.kwargs["data"]), {"key": "synthetic-key", "rpm_limit": 100, "max_budget": 700, "budget_duration": "7d"})
+
+    def test_cli_rejects_removed_apply_flags(self):
+        parser = argparse.ArgumentParser()
+        command.configure(parser)
+        for flag in ("--apply", "--yes"):
+            for flags in ([flag], [flag, "--dry-run"], ["--dry-run", flag]):
+                with self.subTest(flags=flags), redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as raised:
+                        parser.parse_args(flags)
+                    self.assertEqual(raised.exception.code, 2)
+
     def test_backend_is_library_shaped_and_adapter_has_no_business_helpers(self):
         source = Path(update_api_key_limits.__file__).read_text()
         tree = ast.parse(source)
@@ -494,7 +528,9 @@ class KeyLimitsIsolationTest(unittest.TestCase):
         with patch.object(command, "load_component_module", side_effect=AssertionError("backend loaded")), patch.object(command, "load_dotenv", side_effect=AssertionError("environment loaded")), patch("builtins.open", side_effect=AssertionError("data read")):
             command.configure(parser)
             self.assertEqual(parser.parse_args([]).page_size, 100)
-            self.assertIn("--apply", parser.format_help())
+            self.assertIn("--dry-run", parser.format_help())
+            self.assertNotIn("--apply", parser.format_help())
+            self.assertNotIn("--yes", parser.format_help())
 
     def test_selected_root_backend_is_used_instead_of_wrapper_checkout(self):
         from llmproxy.core.component_modules import load_component_module
@@ -508,7 +544,7 @@ class KeyLimitsIsolationTest(unittest.TestCase):
             parser = argparse.ArgumentParser()
             command.configure(parser)
             with patch.dict(os.environ, DUMMY_MANAGEMENT_ENV), patch.object(command, "load_dotenv"), patch.object(selected, "set_key_limits", return_value=0) as limits:
-                self.assertEqual(command.run(parser.parse_args(["--apply", "--page-size", "999", "--reset-spend"]), SimpleNamespace(root=root, component_dir=root / "chosen-config-owner")), 0)
+                self.assertEqual(command.run(parser.parse_args(["--page-size", "999", "--reset-spend"]), SimpleNamespace(root=root, component_dir=root / "chosen-config-owner")), 0)
             kwargs = limits.call_args.kwargs
             self.assertEqual(kwargs["config_path"], root / "chosen-config-owner" / "configs" / "key-limits.json")
             self.assertTrue(kwargs["apply"])

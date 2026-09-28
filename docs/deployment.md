@@ -103,6 +103,78 @@ uv run llmproxy deploy --preset default --no-local-overrides --dry-run
 
 Rendered files use mode `0600` because selected local overrides may contain sensitive values.
 
+## CPA v8 bootstrap and rollback
+
+The CPA example at `components/llmproxy/cli-proxy-api/configs/config.example.yaml`
+uses the v8 layout, checked against CPA v8.0.3. Use it for new v8 installations,
+not as a replacement for an existing private configuration or a v7 server.
+The LiteLLM integration JSON is a different schema and does not need this migration.
+
+### Fresh bootstrap (local preparation)
+
+1. Confirm the intended CPA image supports v8 configuration. Record/pin the intended
+   image tag or digest in your deployment overrides; the base Compose image is unpinned.
+2. Copy the example only if no local config exists:
+
+   ```bash
+   test ! -e components/llmproxy/cli-proxy-api/configs/config.local.yaml && \
+     (umask 077; cp components/llmproxy/cli-proxy-api/configs/config.example.yaml \
+       components/llmproxy/cli-proxy-api/configs/config.local.yaml)
+   ```
+
+3. Populate private settings in the ignored local file before deployment. Set a
+   management secret under `management.secret-key` when using remote management;
+   the empty example is not a usable remote-management credential. Client keys go
+   under `access.api-keys`; upstream provider keys use the separate v8 `api-keys`
+   tree. Do not commit secrets or copy the old top-level client `api-keys` list there.
+4. Validate/render locally using the read-only workflow above. Deployment requires
+   separate authorization and the usual live readback checks.
+
+### Existing installation: the volume owns the active config
+
+`compose.yaml` mounts the Docker config at `/CLIProxyAPI/config_ro/config.yaml`.
+On startup, it copies this seed to `/CLIProxyAPI/config/config.yaml` **only if the
+latter does not exist**. The writable file lives in `cli-proxy-api-config-data`.
+Changing the repository seed or its content-addressed Docker config and redeploying
+does not overwrite an existing runtime file. Do not delete the volume to force a refresh.
+
+CPA v8.0.3 can load a purely legacy v7 configuration. A successful write through
+`/v8/management/config…` migrates it to v8; a GET does not migrate it. Avoid mixed
+legacy/v8 fields: new fields take precedence and legacy entries may be removed.
+The `/v0/management` API remains supported. Inference URLs must not be changed to
+`/v8/management`.
+
+Before an authorized upgrade or migration:
+
+- Identify the actual CPA task/node and volume mounts through Docker/Portainer;
+  Compose volume keys are not necessarily the deployed volume names.
+- Record the running image digest and service specification/overrides.
+- Take protected backups of the **active** `/CLIProxyAPI/config/config.yaml`,
+  `/CLIProxyAPI/auth`, and `/CLIProxyAPI/plugins` where used. Preserve ownership and
+  permissions; keep copies off the volumes being changed. The repository seed is
+  not a substitute for the active config backup.
+- Coordinate a maintenance window and stop CPA writers while taking a consistent
+  backup. Retain the original v7 config separately from any migrated v8 backup.
+- After upgrade, verify the running image, task health, persisted config layout,
+  auth availability, management access, and representative inference routes.
+  A listening port alone does not prove routing works.
+
+### Rollback after an authorized upgrade
+
+1. Stop CPA tasks/writers before restoring files; prevent a v8 instance from
+   rewriting the restored v7 configuration during rollback.
+2. Restore the matching pre-upgrade config in the writable config volume, and the
+   auth/plugin backups if they were changed incompatibly. Preserve permissions.
+3. Restore the recorded v7 image digest and corresponding service settings, then
+   restart only after the config and runtime version agree. Changing the image
+   alone is insufficient once the persisted configuration has migrated to v8.
+4. Read back the actual mounts, active config version, running image and task
+   state. Verify management access and representative inference requests again.
+   Keep backups until these checks pass; do not remove volumes as rollback cleanup.
+
+Reference: [CPA v8.0.3 management API](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.3/docs/management-api-v8.md)
+and [configuration example](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.3/config.example.yaml).
+
 ## Live deployment boundary
 
 Refactor verification stops at rendering, validation, dry-run, tests, and package installation. A live deploy must be explicitly requested and then verified by reading back the exact stack, service/task state, effective environment scope, config references, networks, volumes, and health endpoints.

@@ -58,9 +58,13 @@ uv run llmproxy llmproxy/litellm config sync --preset default --only aliases,fal
 
 Supported sections are `credentials`, `models`, `aliases`, `fallbacks`, `public_model_hub`, `router_settings`, and `guardrails`.
 
+Alias keys containing `*` are emitted as LiteLLM object aliases with `hidden: true`; their model target remains routable while the alias is omitted from discovery. Non-wildcard aliases retain their configured representation.
+
 `--dry-run` validates desired configuration resolution and selected-section identities, then stops before live LiteLLM inventory preflight or mutations. It does not compute a live diff, preview creates/updates/deletes or a prune plan, or verify management API connectivity. Configuration resolution may still query provider APIs for model discovery and requires complete provider inputs; dry-run is not an offline guarantee.
 
 Invalid section names, missing files/environment, lookup failures, and partial API failures return non-zero. A failed operation is never followed by a success result.
+
+Without `--force`, existing model identities retain their live configuration; differing desired parameters do not make a skipped model fail convergence. New models still require readback of the desired payload. Use `--force` to replace existing configurations. Credential prune with no stale names is a no-op and does not require readable secrets. When stale credentials exist, unsupported inventory evidence and projected model references are checked before synchronization writes; destructive readback checks remain in place.
 
 Mutating sync requires complete provider credentials and trustworthy model/alias resolution. Missing API keys, missing resolved provider `interfaces`, malformed desired sections, missing inheritance or `$base` targets, unmatched `$models:` aliases, alias cycles, unresolved routing references, or incomplete provider discovery abort before synchronization writes. Providers may inherit `interfaces`; an explicitly empty resolved interface map is intentional empty state, unlike an omitted field. Omitted credentials, models, aliases, fallbacks, or public-model-hub sections mean “leave unchanged”, including during `--prune`; only an explicitly supplied empty section clears or prunes that state. Alias-to-public-hub expansion is opt-in through `public_model_hub_aliases_autofill_enabled`; an explicit `public_model_hub` list always wins. A generated config can be supplied again through `--config` without losing resolved sections or gaining destructive authority. `router_settings` cannot contain the dedicated alias or fallback keys.
 
@@ -83,11 +87,13 @@ Ignored private overrides:
 components/llmproxy/litellm/configs/key-limits.local.json
 ```
 
-Key creation and key-limit backend modules are `src.key_create` and `src.key_limits`, loaded through the same generic loader. Canonical key commands use `llmproxy llmproxy/litellm create-key` and `llmproxy llmproxy/litellm key-limits`. Existing global `key create` and `key limits` aliases and command options remain unchanged.
+Key creation and key-limit backend modules are `src.key_create` and `src.key_limits`, loaded through the same generic loader. Canonical key commands use `llmproxy llmproxy/litellm create-key` and `llmproxy llmproxy/litellm key-limits`. Existing global `key create` and `key limits` aliases remain supported.
 
-Dry-run and apply:
+Key-limit commands apply immediately by default. Use `--dry-run` to list keys and preview changes without updating them. There are no `--apply` or `--yes` flags for key limits.
 
 ```bash
-uv run llmproxy key limits --dry-run
-uv run llmproxy key limits --apply
+uv run llmproxy llmproxy/litellm key-limits --max-budget 700 --dry-run
+uv run llmproxy llmproxy/litellm key-limits --max-budget 700
 ```
+
+These commands also set the default RPM limit to `100` and budget duration to `7d`; they do not reset spend unless `--reset-spend` is supplied. Per-key rules can override the budget/RPM defaults, and keys matching `default_user_id` remain excluded.

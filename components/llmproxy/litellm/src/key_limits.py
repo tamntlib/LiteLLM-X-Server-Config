@@ -395,7 +395,7 @@ def set_key_limits(
                 f"Would update {key_label(key_record)}: "
                 f"rpm_limit={rpm_limit}, max_budget={format_amount(max_budget)}",
             )
-        report("Add --apply to apply these changes.")
+        report("Run without --dry-run to apply these changes.")
         return 0
 
     failed = 0

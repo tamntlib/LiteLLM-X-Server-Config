@@ -1130,6 +1130,45 @@ def expand_alias_refs(
     return expanded
 
 
+def alias_target_model(target: object) -> str | None:
+    """Return the model name from either LiteLLM alias representation."""
+    if isinstance(target, str) and target:
+        return target
+    if isinstance(target, dict):
+        model = target.get("model")
+        if isinstance(model, str) and model:
+            return model
+    return None
+
+
+def is_valid_alias_target(target: object) -> bool:
+    if isinstance(target, str):
+        return bool(target)
+    if not isinstance(target, dict):
+        return False
+    if set(target) - {"model", "hidden"}:
+        return False
+    if alias_target_model(target) is None:
+        return False
+    return "hidden" not in target or isinstance(target["hidden"], bool)
+
+
+def hide_wildcard_aliases(aliases: dict | None) -> dict | None:
+    """Keep wildcard aliases routable while omitting them from discovery."""
+    if aliases is None:
+        return None
+    hidden = {}
+    for name, target in aliases.items():
+        if "*" not in name:
+            hidden[name] = target
+            continue
+        if isinstance(target, dict):
+            hidden[name] = {**target, "hidden": True}
+        else:
+            hidden[name] = {"model": target, "hidden": True}
+    return hidden
+
+
 def expand_guardrails(
     guardrails: dict | list,
     *,
@@ -1430,13 +1469,16 @@ def _validate_complete_config_shape(config: dict, base_config: dict) -> None:
         or any(
             not isinstance(name, str)
             or not name
-            or not isinstance(target, str)
-            or (not target and not name.startswith("$models:"))
+            or not (
+                is_valid_alias_target(target)
+                or (isinstance(target, str) and not target and name.startswith("$models:"))
+            )
             for name, target in aliases.items()
         )
     ):
         raise ModelDiscoveryError(
-            "Top-level 'aliases' must be an object of non-empty string identifiers and targets or null"
+            "Top-level 'aliases' must map non-empty identifiers to model names "
+            "or {model, hidden} objects, or be null"
         )
 
     for section in ("credentials", "models", "fallbacks", "public_model_hub"):
@@ -1689,6 +1731,7 @@ def generate_config(
             if isinstance(raw_aliases, dict)
             else raw_aliases
         )
+    aliases = hide_wildcard_aliases(aliases)
     explicit_public_model_hub = config.get("public_model_hub")
     if explicit_public_model_hub is not None:
         public_model_hub = list(explicit_public_model_hub)
@@ -1744,10 +1787,14 @@ def validate_aliases(aliases: dict, model_names: set):
     alias_keys = set(aliases.keys())
     valid = True
     for alias_name, target in aliases.items():
-        if target not in valid_targets and not _matches_known_model_aliases(target, model_names, alias_keys):
+        target_model = alias_target_model(target)
+        if target_model is None or (
+            target_model not in valid_targets
+            and not _matches_known_model_aliases(target_model, model_names, alias_keys)
+        ):
             valid = False
             logger.warning(
-                f"⚠️ Alias '{alias_name}' points to non-existent model: {target}"
+                f"⚠️ Alias '{alias_name}' points to non-existent model: {target_model}"
             )
     return valid
 
@@ -1765,8 +1812,8 @@ def validate_alias_cycles(aliases: dict, model_names: set[str]) -> None:
             cycle = " -> ".join((*visiting[cycle_start:], alias))
             raise ModelDiscoveryError(f"Configuration contains an alias cycle: {cycle}")
         visiting.append(alias)
-        target = aliases.get(alias)
-        if isinstance(target, str) and target in aliases and target not in model_names:
+        target = alias_target_model(aliases.get(alias))
+        if target is not None and target in aliases and target not in model_names:
             visit(target)
         visiting.pop()
         resolved.add(alias)

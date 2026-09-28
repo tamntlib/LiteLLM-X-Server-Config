@@ -72,9 +72,10 @@ def configure(parser):
     )
     parser.add_argument("--page-size", type=positive_int, default=MAX_PAGE_SIZE)
     parser.add_argument("--reset-spend", action="store_true")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--apply", "--yes", dest="apply", action="store_true")
-    mode.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--dry-run", dest="apply", action="store_false",
+        help="Preview changes without updating keys (default: apply immediately)",
+    )
 
 
 def run(args, context):

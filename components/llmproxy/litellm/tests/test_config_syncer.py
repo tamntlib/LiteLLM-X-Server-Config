@@ -46,6 +46,21 @@ class ConfigModuleTestMixin:
 
 
 class AliasSyncTest(ConfigModuleTestMixin, unittest.TestCase):
+    def test_router_inventory_accepts_hidden_alias_targets(self):
+        expected = {
+            "model_group_alias": {
+                "gpt-*": {"model": "openai/gpt-5.5", "hidden": True}
+            }
+        }
+        with patch.object(
+            self.config_module,
+            "get_request",
+            return_value=(True, {"current_values": expected}),
+        ):
+            actual = self.config_module.get_router_settings()
+
+        self.assertEqual(actual, expected)
+
     def test_router_update_rejects_missing_preserved_nullable_key(self):
         current = {"custom_nullable": None, "timeout": 30}
         readback = {"timeout": 60}
@@ -300,7 +315,7 @@ class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-    def test_replacement_rejects_same_id_unmanaged_configuration_drift(self):
+    def test_replacement_does_not_compare_existing_full_objects(self):
         old = {
             "model_name": "replace",
             "litellm_params": {"model": "provider/old"},
@@ -345,8 +360,9 @@ class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
                 cache,
                 pending_replacements=pending,
             )
-        self.assertFalse(success)
-        self.assertEqual(pending, [])
+        self.assertTrue(success)
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["new_id"], "new-id")
 
     def test_model_delete_rejects_same_id_unmanaged_configuration_drift(self):
         desired = {
@@ -560,7 +576,7 @@ class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await self.config_module.sync_models({"models": models}))
         self.assertEqual(create.call_count, 1)
 
-    async def test_skipped_stale_model_blocks_next_write(self):
+    async def test_skipped_stale_model_allows_next_write_without_force(self):
         first = {
             "model_name": "first",
             "litellm_params": {"model": "openai/desired"},
@@ -581,7 +597,7 @@ class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
             patch.object(
                 self.config_module,
                 "get_all_models",
-                side_effect=[[stale], [stale]],
+                side_effect=[[stale], [stale], [stale, {**second, "model_info": {"id": "new-id"}}]],
             ),
             patch.object(
                 self.config_module,
@@ -589,10 +605,11 @@ class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
                 return_value=(True, "accepted"),
             ) as post,
         ):
-            self.assertFalse(
+            self.assertTrue(
                 await self.config_module.sync_models({"models": [first, second]})
             )
-        post.assert_not_called()
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.args[1]["model_name"], "second")
 
     def test_model_prune_stops_after_first_delete_failure(self):
         inventory = [
@@ -659,6 +676,88 @@ class ModelSyncTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestCase):
             success = await self.config_module.sync_models({"models": payloads})
         self.assertFalse(success)
         self.assertEqual(create.call_count, 1)
+
+    async def test_failed_force_sync_rolls_back_prepared_replacements(self):
+        payloads = [
+            {"model_name": name, "litellm_params": {}, "model_info": {}}
+            for name in ("first", "second")
+        ]
+        inventory = [
+            {
+                "model_name": name,
+                "litellm_params": {},
+                "model_info": {"id": f"{name}-old"},
+            }
+            for name in ("first", "second")
+        ]
+        pending = []
+
+        def create(payload, force, actor, cache, *, pending_replacements, **kwargs):
+            if payload["model_name"] == "first":
+                pending_replacements.append({"new_id": "first-new"})
+                return True, "replaced", 0
+            return False, None, 0
+
+        with (
+            patch.object(self.config_module, "get_actor_from_key", return_value="actor"),
+            patch.object(self.config_module, "_create_model", side_effect=create),
+            patch.object(
+                self.config_module,
+                "delete_model_by_id",
+                return_value=(True, "deleted"),
+            ) as delete,
+            patch.object(self.config_module, "get_all_models", return_value=inventory),
+        ):
+            success = await self.config_module.sync_models(
+                {"models": payloads},
+                force=True,
+                initial_inventory=inventory,
+                pending_replacements=pending,
+            )
+
+        self.assertFalse(success)
+        delete.assert_called_once_with("first-new")
+
+    def test_failed_replacement_removes_orphaned_new_model(self):
+        existing = {
+            "model_name": "provider/model",
+            "litellm_params": {"model": "provider/old", "litellm_credential_name": "credential"},
+            "model_info": {"id": "old-id"},
+        }
+        payload = {
+            "model_name": "provider/model",
+            "litellm_params": {"model": "provider/new", "litellm_credential_name": "credential"},
+            "model_info": {},
+        }
+        orphan = {
+            **payload,
+            "litellm_params": {"model": "provider/wrong", "litellm_credential_name": "credential"},
+            "model_info": {"id": "orphan-id"},
+        }
+        with (
+            patch.object(self.config_module, "post_request", return_value=(True, "accepted")),
+            patch.object(
+                self.config_module,
+                "get_all_models",
+                side_effect=[[existing, orphan], [existing]],
+            ),
+            patch.object(
+                self.config_module,
+                "delete_model_by_id",
+                return_value=(True, "deleted"),
+            ) as delete,
+        ):
+            success, action, deleted = self.config_module._create_model(
+                payload,
+                True,
+                "tester",
+                {("provider/model", "credential"): [existing]},
+            )
+
+        self.assertFalse(success)
+        self.assertIsNone(action)
+        self.assertEqual(deleted, 0)
+        delete.assert_called_once_with("orphan-id")
 
     def test_model_readback_requires_desired_configuration(self):
         config = {
@@ -2129,6 +2228,32 @@ class ConfigSyncCommandTest(ConfigModuleTestMixin, unittest.IsolatedAsyncioTestC
                 "get_router_settings",
                 return_value={
                     "model_group_alias": {"alias": "live-target"},
+                    "fallbacks": [],
+                },
+            ),
+            patch.object(
+                self.config_module, "get_current_public_model_hub", return_value=[]
+            ),
+            patch.object(self.config_module, "delete_model_by_id") as delete,
+        ):
+            self.assertFalse(self.config_module.prune_models({"models": []}))
+        delete.assert_not_called()
+
+    def test_hidden_alias_target_protects_model_from_prune(self):
+        stale = {
+            "model_name": "live-target",
+            "litellm_params": {},
+            "model_info": {"id": "stale-id"},
+        }
+        with (
+            patch.object(self.config_module, "get_all_models", return_value=[stale]),
+            patch.object(
+                self.config_module,
+                "get_router_settings",
+                return_value={
+                    "model_group_alias": {
+                        "gpt-*": {"model": "live-target", "hidden": True}
+                    },
                     "fallbacks": [],
                 },
             ),

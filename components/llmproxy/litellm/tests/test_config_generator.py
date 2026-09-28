@@ -1412,6 +1412,36 @@ class ResolveProviderModelsTest(unittest.TestCase):
 
         self.assertEqual(generated["aliases"], {})
 
+    def test_generate_config_marks_wildcard_aliases_hidden(self):
+        config = self._base_config()
+        config["aliases"] = {
+            "gpt-*": "openai/gpt-5.5",
+            "claude-*": {"model": "openai/gpt-5.5", "hidden": False},
+            "stable": "openai/gpt-5.5",
+        }
+
+        with patch(f"{generator.__name__}.validate_prices"):
+            generated = generate_config(config, require_complete=True)
+
+        self.assertEqual(
+            generated["aliases"],
+            {
+                "gpt-*": {"model": "openai/gpt-5.5", "hidden": True},
+                "claude-*": {"model": "openai/gpt-5.5", "hidden": True},
+                "stable": "openai/gpt-5.5",
+            },
+        )
+
+    def test_generated_hidden_aliases_round_trip(self):
+        config = self._base_config()
+        config["aliases"] = {"gpt-*": "openai/gpt-5.5"}
+
+        with patch(f"{generator.__name__}.validate_prices"):
+            generated = generate_config(config, require_complete=True)
+            regenerated = generate_config(generated, require_complete=True)
+
+        self.assertEqual(regenerated, generated)
+
     def test_generate_config_preserves_top_level_manual_models(self):
         config = self._base_config()
         config["models"] = [

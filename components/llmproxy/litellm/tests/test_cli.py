@@ -357,14 +357,27 @@ class TestLiteLLMCLI(unittest.TestCase):
         )
         self.assertEqual(canonical.returncode, 0)
         self.assertEqual(alias.returncode, 0)
-        self.assertIn("--apply", canonical.stdout)
-        self.assertIn("--apply", alias.stdout)
+        for output in (canonical.stdout, alias.stdout):
+            self.assertIn("--dry-run", output)
+            self.assertNotIn("--apply", output)
+            self.assertNotIn("--yes", output)
 
 
-    def test_key_limits_apply_flag_is_wired_to_component_command(self):
-        args = create_parser(self.root).parse_args(["key", "limits", "--apply"])
+    def test_key_limits_applies_by_default(self):
+        args = create_parser(self.root).parse_args(["key", "limits"])
         self.assertTrue(args.apply)
         self.assertEqual(args._command_spec.component_identifier, "llmproxy/litellm")
+
+    def test_key_limits_removed_flags_fail_before_backend_execution(self):
+        for prefix in (["llmproxy/litellm", "key-limits"], ["key", "limits"]):
+            for flag in ("--apply", "--yes"):
+                with self.subTest(prefix=prefix, flag=flag):
+                    result = self._console(
+                        ["uv", "run", "llmproxy", *prefix, flag],
+                        capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn(f"unrecognized arguments: {flag}", result.stderr)
 
 
     def test_unknown_preset_has_concise_exit_two_without_traceback(self):

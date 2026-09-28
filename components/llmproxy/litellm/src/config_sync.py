@@ -35,8 +35,10 @@ from llmproxy.core.env import load_dotenv
 from llmproxy.core.command import CommandError
 from .config_generate import (
     ModelDiscoveryError,
+    alias_target_model,
     generate_config,
     generate_config_for_preset,
+    is_valid_alias_target,
     router_fallback_references,
     validate_aliases,
     validate_fallbacks,
@@ -373,6 +375,23 @@ def delete_model_by_id(model_id):
     return post_request("model/delete", {"id": model_id})
 
 
+def _rollback_pending_replacements(pending_replacements: list[dict]) -> None:
+    """Remove replacements when a multi-model force sync cannot commit."""
+    for replacement in reversed(pending_replacements):
+        new_id = replacement["new_id"]
+        success, result = delete_model_by_id(new_id)
+        if not success:
+            logger.error("Failed to roll back replacement model %s: %s", new_id, result)
+            continue
+        try:
+            inventory = get_all_models()
+        except CommandError as exc:
+            logger.error("Could not verify replacement rollback for %s: %s", new_id, exc)
+            continue
+        if any(model["model_info"]["id"] == new_id for model in inventory):
+            logger.error("Replacement rollback did not remove model %s", new_id)
+
+
 def _model_credential_name(model: dict) -> str:
     return model.get("litellm_params", {}).get("litellm_credential_name", "")
 
@@ -496,34 +515,29 @@ def _create_model(
         post_create_ids = {
             model["model_info"]["id"] for model in post_create_inventory
         }
-        if not initial_inventory_ids <= post_create_ids:
-            logger.error(
-                "Replacement creation changed unrelated model inventory: %s (%s)",
-                full_model_name,
-                credential_name,
-            )
-            return False, None, 0
-        post_create_by_id = _models_by_id(post_create_inventory)
-        if any(
-            post_create_by_id.get(model_id) != model
-            for model_id, model in initial_inventory_by_id.items()
-        ):
-            logger.error(
-                "Replacement creation changed existing model configuration: %s (%s)",
-                full_model_name,
-                credential_name,
-            )
-            return False, None, 0
+        new_ids = post_create_ids - initial_inventory_ids
         new_same_identity = [
             model
             for model in post_create_inventory
-            if model["model_info"]["id"] not in old_ids
+            if model["model_info"]["id"] in new_ids
             and (
                 model["model_name"],
                 _model_credential_name(model),
             )
             == model_key
         ]
+        if not initial_inventory_ids <= post_create_ids:
+            logger.error(
+                "Replacement creation changed unrelated model inventory: %s (%s)",
+                full_model_name,
+                credential_name,
+            )
+            if len(new_ids) == len(new_same_identity) == 1:
+                _rollback_pending_replacements(
+                    [{"new_id": new_same_identity[0]["model_info"]["id"]}]
+                )
+            return False, None, 0
+        post_create_by_id = _models_by_id(post_create_inventory)
         replacement_candidates = [
             model
             for model in new_same_identity
@@ -534,6 +548,10 @@ def _create_model(
                 f"Replacement model did not converge to exactly one new ID: "
                 f"{full_model_name} ({credential_name})"
             )
+            if len(new_ids) == len(new_same_identity) == 1:
+                _rollback_pending_replacements(
+                    [{"new_id": new_same_identity[0]["model_info"]["id"]}]
+                )
             return False, None, 0
 
         new_id = new_same_identity[0]["model_info"]["id"]
@@ -543,6 +561,10 @@ def _create_model(
                 full_model_name,
                 credential_name,
             )
+            if len(new_ids) == len(new_same_identity) == 1:
+                _rollback_pending_replacements(
+                    [{"new_id": new_same_identity[0]["model_info"]["id"]}]
+                )
             return False, None, 0
         if required_inventory_ids is not None:
             required_inventory_ids.add(new_id)
@@ -664,8 +686,7 @@ def get_router_settings():
     if not isinstance(aliases, dict) or any(
         not isinstance(source, str)
         or not source
-        or not isinstance(target, str)
-        or not target
+        or not is_valid_alias_target(target)
         for source, target in aliases.items()
     ):
         raise CommandError("Router settings inventory contains invalid aliases")
@@ -1171,6 +1192,27 @@ async def sync_credentials(config: dict, force=False, *, initial_inventory=None)
     return True
 
 
+def _preserve_existing_models(config: dict, inventory: list[dict]) -> dict:
+    """Non-force sync manages membership, not existing model configuration."""
+    if config.get("models") is None:
+        return config
+    existing = {}
+    for model in inventory:
+        key = (model["model_name"], _model_credential_name(model))
+        existing.setdefault(key, model)
+    models = []
+    for desired in config["models"]:
+        live = existing.get((desired["model_name"], _model_credential_name(desired)))
+        if live is None:
+            models.append(desired)
+        else:
+            models.append({
+                "model_name": live["model_name"],
+                "litellm_params": dict(live["litellm_params"]),
+            })
+    return {**config, "models": models}
+
+
 async def sync_models(
     config: dict,
     force=False,
@@ -1199,6 +1241,8 @@ async def sync_models(
     # Cache existing models once before processing (store matching raw model objects)
     existing_models_cache = {}
     all_models = get_all_models() if initial_inventory is None else initial_inventory
+    if not force:
+        model_payloads = _preserve_existing_models(config, all_models)["models"]
     required_inventory_ids = {
         model["model_info"]["id"] for model in all_models
     }
@@ -1288,6 +1332,8 @@ async def sync_models(
         icon = "❌"
     else:
         icon = "⚠️"
+    if failed_count and pending_replacements:
+        _rollback_pending_replacements(pending_replacements)
     logger.info(
         f"{icon} Models: Created {created_count}, Replaced {replaced_count}, Deleted {deleted_count}, Failed {failed_count}"
     )
@@ -1610,6 +1656,13 @@ def _plan_credential_prune(
         if existing_credentials is None
         else existing_credentials
     )
+    # No deletions require no secret proof. Names come from validated inventory.
+    expected_names = _expected_credentials(config)
+    inventory_names = {
+        item["credential_name"] for item in existing_inventory if isinstance(item, dict)
+    }
+    if inventory_names == expected_names and len(inventory_names) == len(existing_inventory):
+        return ([], expected_names, existing_inventory)
     if any(
         not isinstance(item, dict)
         or not _credential_inventory_entry_is_verifiable(item)
@@ -1656,6 +1709,11 @@ def prune_credentials(config: dict, plan=None) -> bool:
     if plan is None:
         return False
     stale, expected, current_inventory = plan
+    if not stale:
+        return {
+            item["credential_name"] if isinstance(item, dict) else item
+            for item in current_inventory
+        } == expected
     initial_by_name = {
         item["credential_name"]: item for item in current_inventory
     }
@@ -1837,10 +1895,17 @@ def _routing_model_references(
             visited.add(target)
             if target not in aliases:
                 break
-            target = aliases[target]
+            next_target = alias_target_model(aliases[target])
+            if next_target is None:
+                break
+            target = next_target
         raise CommandError(f"Projected routing contains an unresolved reference: {reference}")
 
-    references = {resolve(target) for target in aliases.values()}
+    references = {
+        resolve(target_model)
+        for target in aliases.values()
+        if (target_model := alias_target_model(target)) is not None
+    }
     for field in ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
         for rule in settings.get(field) or []:
             for source, targets in rule.items():
@@ -2041,6 +2106,34 @@ async def sync_config(
     )
     _preflight_routing_graph(config, components, snapshot, prune=prune)
     model_inventory = snapshot["models"]
+    if not force and "models" in components:
+        config = _preserve_existing_models(config, model_inventory or [])
+    if prune and "credentials" in components and config.get("credentials") is not None:
+        # Reject unsupported destructive credential evidence before any writes.
+        expected_names = _expected_credentials(config)
+        stale_credentials = [
+            item for item in snapshot["credentials"] or []
+            if item["credential_name"] not in expected_names
+        ]
+        if stale_credentials and any(
+            not _credential_inventory_entry_is_verifiable(item)
+            for item in snapshot["credentials"] or []
+        ):
+            raise CommandError("Credential prune preflight requires verifiable inventory before writes")
+        projected_models = (
+            config["models"]
+            if "models" in components and config.get("models") is not None
+            else model_inventory or []
+        )
+        stale_names = {item["credential_name"] for item in stale_credentials}
+        in_use = stale_names & {
+            _model_credential_name(model) for model in projected_models
+        }
+        if in_use:
+            raise CommandError(
+                "Credential prune preflight: credentials still referenced after model prune: "
+                + ", ".join(sorted(in_use))
+            )
     live_model_names = {
         model["model_name"] for model in (model_inventory or [])
     }

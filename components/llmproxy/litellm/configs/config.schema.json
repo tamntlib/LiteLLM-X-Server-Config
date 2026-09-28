@@ -73,8 +73,15 @@
             "type": ["object", "null"],
             "description": "Model name aliases mapping. Keys can be literal alias names or '$models:<service>/<interface>' refs that expand into one alias per model in that provider/interface (raw model name -> prefixed model name).",
             "additionalProperties": {
-                "type": "string",
-                "description": "Target model name, another alias, or empty string (for $models: refs, empty means use the prefixed model name)"
+                "oneOf": [
+                    {
+                        "type": "string",
+                        "description": "Target model name, another alias, or empty string (for $models: refs, empty means use the prefixed model name)"
+                    },
+                    {
+                        "$ref": "#/$defs/model_group_alias_target"
+                    }
+                ]
             }
         },
         "fallbacks": {
@@ -136,6 +143,16 @@
         }
     },
     "$defs": {
+        "model_group_alias_target": {
+            "type": "object",
+            "description": "LiteLLM model group alias target with discovery metadata",
+            "required": ["model"],
+            "properties": {
+                "model": {"type": "string", "minLength": 1},
+                "hidden": {"type": "boolean"}
+            },
+            "additionalProperties": false
+        },
         "delete_keys": {
             "type": "array",
             "description": "Reserved deep-merge directive listing inherited keys to remove from the current object.",

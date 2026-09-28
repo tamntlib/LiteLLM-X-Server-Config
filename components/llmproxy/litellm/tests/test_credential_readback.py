@@ -85,7 +85,7 @@ class CredentialReadbackTest(unittest.IsolatedAsyncioTestCase):
             {"tokens": ["sy****ue"]}, {"tokens": ["synthetic-secret-value"]},
         ))
 
-    def test_masked_readback_cannot_authorize_credential_prune(self):
+    def test_masked_inventory_allows_noop_prune_without_deletions(self):
         self.assertTrue(sync.verify_credentials(self.config, [self.actual]))
         self.assertFalse(sync._credential_inventory_entry_is_verifiable(self.actual))
         with (
@@ -93,7 +93,7 @@ class CredentialReadbackTest(unittest.IsolatedAsyncioTestCase):
             patch.object(sync, "get_all_models") as models,
             patch.object(sync, "delete_credential") as delete,
         ):
-            self.assertFalse(sync.prune_credentials(self.config))
+            self.assertTrue(sync.prune_credentials(self.config))
         models.assert_not_called()
         delete.assert_not_called()
 

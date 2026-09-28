@@ -21,7 +21,9 @@
             "o-1": {}, "o-1-vision": {},
             "o-2": {}, "o-2-vision": {},
             "o-3": {}, "o-3-vision": {},
-            "gpt-image-2": {}, "codex-auto-review": {}
+            "codex-auto-review": {},
+            "gpt-image-2.5-flare": {}, "gpt-image-2.5-sunburst": {},
+            "grok-4.6": {}
           }
         }
       }
@@ -29,34 +31,46 @@
   },
   "public_model_hub": [],
   "model_name_base_model_map": {
-    "a-fallback": "gpt-5.6-sol", "a-fallback-vision": "gpt-5.6-sol",
+    "a-fallback": "gpt-6-sol", "a-fallback-vision": "gpt-6-sol",
     "a-0": "gpt-6-astra", "a-0-vision": "gpt-6-astra",
-    "a-1": "gpt-5.6-sol", "a-1-vision": "gpt-5.6-sol",
-    "a-2": "gpt-5.6-terra", "a-2-vision": "gpt-5.6-terra",
-    "a-3": "gpt-5.6-luna", "a-3-vision": "gpt-5.6-luna",
-    "o-fallback": "gpt-5.6-sol", "o-fallback-vision": "gpt-5.6-sol",
+    "a-1": "gpt-6-sol", "a-1-vision": "gpt-6-sol",
+    "a-2": "gpt-6-sol", "a-2-vision": "gpt-6-sol",
+    "a-3": "gpt-6-luna", "a-3-vision": "gpt-6-luna",
+    "o-fallback": "gpt-6-sol", "o-fallback-vision": "gpt-6-sol",
     "o-0": "gpt-6-astra", "o-0-vision": "gpt-6-astra",
-    "o-1": "gpt-5.6-sol", "o-1-vision": "gpt-5.6-sol",
-    "o-2": "gpt-5.6-terra", "o-2-vision": "gpt-5.6-terra",
-    "o-3": "gpt-5.6-luna", "o-3-vision": "gpt-5.6-luna"
+    "o-1": "gpt-6-sol", "o-1-vision": "gpt-6-sol",
+    "o-2": "gpt-6-sol", "o-2-vision": "gpt-6-sol",
+    "o-3": "gpt-6-luna", "o-3-vision": "gpt-6-luna",
+    "codex-auto-review": "gpt-6-luna"
   },
   "aliases": {
-    "claude-fable-*": "anthropic/a-0",
-    "claude-opus-*": "anthropic/a-1",
-    "claude-sonnet-*": "anthropic/a-2",
-    "claude-haiku-*": "anthropic/a-3",
+    "claude-*": "anthropic/a-1",
+    "claude-fable-5-1": "anthropic/a-0",
+    "claude-opus-5": "anthropic/a-1",
+    "claude-sonnet-5": "anthropic/a-2",
+    "claude-haiku-4-5-20251001": "anthropic/a-3",
+    "openai/claude-*": "openai/o-1",
+    "openai/claude-fable-5-1": "openai/o-0",
+    "openai/claude-opus-5": "openai/o-1",
+    "openai/claude-sonnet-5": "openai/o-2",
+    "openai/claude-haiku-4-5-20251001": "openai/o-3",
     "gpt-*": "openai/o-1",
-    "gpt-*-astra": "openai/o-0",
-    "gpt-*-sol": "openai/o-1",
-    "gpt-*-terra": "openai/o-2",
-    "gpt-*-luna": "openai/o-3",
-    "gpt-image-*": "openai/gpt-image-2",
+    "gpt-6-astra": "openai/o-0",
+    "gpt-6-sol": "openai/o-1",
+    "gpt-6-luna": "openai/o-3",
+    "anthropic/gpt-*": "anthropic/a-1",
+    "anthropic/gpt-6-astra": "anthropic/a-0",
+    "anthropic/gpt-6-sol": "anthropic/a-1",
+    "anthropic/gpt-6-luna": "anthropic/a-3",
+    "gpt-image-*": "openai/gpt-image-2.5-flare",
+    "gpt-image-2.5-flare": "openai/gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst": "openai/gpt-image-2.5-sunburst",
     "codex-auto-review": "openai/codex-auto-review"
   },
   "fallbacks": [
-    {"anthropic/a-0,anthropic/a-1,anthropic/a-2,anthropic/a-3": ["anthropic/a-fallback"]},
-    {"anthropic/a-0-vision,anthropic/a-1-vision,anthropic/a-2-vision,anthropic/a-3-vision": ["anthropic/a-fallback-vision"]},
-    {"openai/o-0,openai/o-1,openai/o-2,openai/o-3": ["openai/o-fallback"]},
-    {"openai/o-0-vision,openai/o-1-vision,openai/o-2-vision,openai/o-3-vision": ["openai/o-fallback-vision"]}
+    {"anthropic/a-1,anthropic/a-2,anthropic/a-3": ["anthropic/a-fallback"]},
+    {"anthropic/a-1-vision,anthropic/a-2-vision,anthropic/a-3-vision": ["anthropic/a-fallback-vision"]},
+    {"openai/o-1,openai/o-2,openai/o-3": ["openai/o-fallback"]},
+    {"openai/o-1-vision,openai/o-2-vision,openai/o-3-vision": ["openai/o-fallback-vision"]}
   ]
 }
