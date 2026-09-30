@@ -22,8 +22,7 @@
             "o-2": {}, "o-2-vision": {},
             "o-3": {}, "o-3-vision": {},
             "codex-auto-review": {},
-            "gpt-image-2.5-flare": {}, "gpt-image-2.5-sunburst": {},
-            "grok-4.6": {}
+            "gpt-image-2.5-flare": {}, "gpt-image-2.5-sunburst": {}
           }
         }
       }
