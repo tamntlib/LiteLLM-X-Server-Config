@@ -13,16 +13,39 @@ uv run llmproxy deploy --preset default --dry-run
 
 These commands inspect, validate, or generate local files. They do not update a live stack.
 
-The Portainer service stack is selected independently and is not part of `all`:
+The Portainer management stack and Traefik ingress stack are selected independently; neither is part of `all`:
 
 ```bash
 uv run llmproxy inputs --preset portainer
 uv run llmproxy validate --preset portainer
 uv run llmproxy render --preset portainer --no-local-overrides
 uv run llmproxy deploy --preset portainer --driver docker --dry-run
+uv run llmproxy inputs --preset traefik
+uv run llmproxy validate --preset traefik
+uv run llmproxy render --preset traefik --no-local-overrides
+uv run llmproxy deploy --preset traefik --driver docker --dry-run
 ```
 
-That dry-run emits one deploy command for the `portainer` stack. Running it without `--dry-run` is a separate live operation and is not part of the source migration.
+Each dry-run emits one deploy command for its named stack. `portainer` contains only Agent + Portainer and requires `PORTAINER_HOST`. `traefik` contains only ingress and requires `CF_DNS_API_TOKEN`, `LETSENCRYPT_EMAIL`, and `TRAEFIK_NODE_ID`. Running without `--dry-run` is a separate live operation, not part of repository synchronization.
+
+### Existing deployment and bootstrap prerequisites
+
+The attachable `public` overlay is an independent prerequisite, not owned by Portainer or Traefik. Every consumer declares `name: public` and `external: true`. For a new installation, first verify that no network named `public` exists on the intended rootful Swarm manager, then create it explicitly:
+
+```bash
+docker -H unix:///var/run/docker.sock network create \
+  --driver overlay --attachable public
+docker -H unix:///var/run/docker.sock network inspect public \
+  --format 'id={{.Id}} driver={{.Driver}} scope={{.Scope}} attachable={{.Attachable}} labels={{json .Labels}}'
+```
+
+Require `driver=overlay`, `scope=swarm`, `attachable=true`, and no `com.docker.stack.namespace` label. These commands are bootstrap instructions, not part of validation or stack deployment. For stack updates, inspect and reuse the existing network; do not delete or recreate it. If its ownership or configuration does not meet these prerequisites, resolve that separately before deployment. Stack dependencies are not deployed implicitly and no preset creates this network.
+
+The ACME volume remains external and keeps the physical name `portainer_traefik-letsencrypt-data`. For an existing installation, reuse it on its original node; set `TRAEFIK_NODE_ID` to that node's Swarm ID. Do not remove the volume or choose another node to bypass a failed preflight. A genuinely new installation requires deliberate provisioning of its certificate volume before deploying Traefik. These are operator-verified prerequisites, not enforced ACME-data checks: preflight validates required inputs/files, not the remote node's volume or certificate contents. Swarm can create a missing local volume on the selected node despite `external: true`; an incorrect but valid manager ID can therefore start Traefik with an empty certificate store.
+
+Operator Docker CLI sources can remain in `/opt/portainer/{deploy.sh,portainer.yaml,.env}` and `/opt/traefix/{deploy.sh,traefix.yaml,.env}`. The stack/component name is `traefik`, while the operator directory/file spelling is `traefix`. Rendering or editing this repository does not rewrite those remote files. Deploy each split stack explicitly; preserve its existing volumes, private inputs, and external network attachments when updating.
+
+This repository supports fresh deployments and updates to the declared stacks. One-off service-splitting and network-recreation scripts, collectors, and operational migration runbooks are not included.
 
 ## Stack selection
 

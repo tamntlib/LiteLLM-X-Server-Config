@@ -1,0 +1,1 @@
+required_environment = ["CF_DNS_API_TOKEN", "LETSENCRYPT_EMAIL", "TRAEFIK_NODE_ID"]

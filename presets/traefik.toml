@@ -1,0 +1,3 @@
+description = "Shared Traefik ingress using the existing public network and ACME volume"
+components = ["traefik/traefik"]
+features = []

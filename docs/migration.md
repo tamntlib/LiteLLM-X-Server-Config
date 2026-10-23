@@ -29,7 +29,7 @@ The **previous** column is historical migration evidence, not an active path, im
 | Component tests relocated | `tests/test_config_generator.py`, `tests/test_config_syncer.py`, `tests/test_keys.py`, `tests/test_key_create.py` | Same filenames under `components/llmproxy/litellm/tests/`, aggregated by root `tests/test_components.py` |
 | Component CLI tests extracted | LiteLLM-specific tests and backend fixtures in `tests/test_cli.py` | `components/llmproxy/litellm/tests/test_cli.py`; generic CLI tests remain at root |
 | Legacy component scripts retired | `litellm_scripts/` | LiteLLM-owned commands, libraries, schemas, data, and tests under `components/llmproxy/litellm/` |
-| Legacy Portainer manifest moved | `portainer/portainer.yaml` | `components/portainer/portainer/compose.yaml`, selected by `presets/portainer.toml` |
+| Combined Portainer manifest split | `portainer/portainer.yaml`, then combined `components/portainer/portainer/compose.yaml` | Agent + Portainer in `components/portainer/portainer/compose.yaml`; ingress in `components/traefik/traefik/compose.yaml`; independent `portainer` and `traefik` presets |
 | Legacy Portainer dotenv consolidated | `portainer/.env.example`, `portainer/.env` | Portainer section in root `.env.example` and private root `.env` |
 | Source-owned contribution namespaced by destination | `components/<stack>/<component>/litellm-config.json` and ignored `litellm-config.local.json` | `components/<stack>/<component>/integrations/llmproxy/litellm/config.json` and ignored sibling `config.local.json` |
 | Unchanged by role-based layout | Source-owned `integrations/llmproxy/litellm/{config.json,config.local.json}` | Same destination namespace under each source component; private sibling remains ignored |
@@ -111,7 +111,7 @@ Content-addressed config names remain stable when source bytes are unchanged.
 
 Removing the empty monitoring base leaves Docker with a single Compose input. Docker then retains the top-level `x-common-healthcheck` extension (`interval: 30s`, `retries: 3`, `timeout: 10s`) that its multi-file merge previously dropped. This is the only monitoring render difference; the service healthcheck and all runtime resources are unchanged. The former monitoring hash was `3edec85e05ea1dbf5418214550e90be929eeb1ba7e582a506ada649a86c30990`. Thus `all` and `default` preserve monitoring runtime/topology parity, not byte parity. Every other stack's golden hash is unchanged.
 
-The component-first `portainer` render is normalized-equivalent to the legacy Portainer manifest and preserves the `traefik`, `agent`, and `portainer` services, networks, volumes, host-mode ports, placement, and routing labels. Its preset is intentionally independent: neither `all` nor another existing production preset inherits it.
+The initial component-first `portainer` render preserved the legacy combined manifest. That is historical parity, not the current topology: `portainer` now contains only Agent + Portainer, and the independent `traefik` preset owns ingress. Both use `public` as external; Docker CLI creates that shared overlay independently of every stack. The agent network and Portainer data stay with Portainer, and Traefik retains the external ACME volume identity. Neither preset is inherited by `all` or the application presets. Current deployment commands reuse the existing shared network; one-off infrastructure migration scripts are not included.
 
 ## Deployment boundary
 

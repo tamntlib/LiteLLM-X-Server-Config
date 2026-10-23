@@ -298,7 +298,7 @@ class StackOwnershipTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         self.assertFalse((root / "stacks").exists())
         stacks = {component.stack for component in discover_components(root).values()}
-        self.assertEqual(stacks, {"llmproxy", "llmproxy-data", "monitoring", "portainer"})
+        self.assertEqual(stacks, {"llmproxy", "llmproxy-data", "monitoring", "portainer", "traefik"})
         for stack in stacks:
             with self.subTest(stack=stack):
                 self.assertFalse((root / "components" / stack / "compose.yaml").exists())

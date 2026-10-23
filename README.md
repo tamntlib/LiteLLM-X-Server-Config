@@ -65,6 +65,74 @@ See:
 - [Adding a component](docs/adding-a-component.md)
 - [Migration](docs/migration.md)
 
+## Server topology
+
+The diagram describes the repository's desired logical topology with `default` **plus the separately selected** `portainer` and `traefik` presets. It is not a live-state inventory or a claim about node count. Headroom is optional (`all` / `llmproxy`), not part of `default`; live-only services such as Vault are outside this repository and are not shown.
+
+```mermaid
+flowchart TB
+    clients["API clients / browsers"]
+    subgraph server["Docker Swarm deployment"]
+        subgraph ingress["stack: traefik — preset: traefik"]
+            traefik["Traefik<br/>host ports 80 / 443"]
+            acme[("Existing ACME volume<br/>portainer_traefik-letsencrypt-data")]
+            traefik -.->|"pinned certificate node"| acme
+        end
+        public[("public overlay — Docker CLI-created<br/>external to every stack; no stack owner")]
+        subgraph management["stack: portainer — preset: portainer"]
+            portainer["Portainer :9000"]
+            agent["Agent :9001 — global"]
+            pdata[("portainer_portainer-data")]
+            portainer -->|"agent-network"| agent
+            portainer -.-> pdata
+        end
+        subgraph apps["stack: llmproxy"]
+            litellm["LiteLLM :4000"]
+            cpa["CLIProxyAPI :8317"]
+            usage["Usage Keeper :8080"]
+            headroom["Headroom :8787<br/>optional — not in default"]
+            cpadata[("CPA auth / config / plugins volumes")]
+            udata[("Usage Keeper data volume")]
+            hdata[("Optional Headroom data volume")]
+            usage -->|"internal API"| cpa
+            cpa -.-> cpadata
+            usage -.-> udata
+            headroom -.-> hdata
+        end
+        subgraph data["stack: llmproxy-data"]
+            postgres["PostgreSQL :5432"]
+            dbdata[("llmproxy-data_db-data")]
+            postgres -.-> dbdata
+        end
+        subgraph observability["stack: monitoring"]
+            netdata["Netdata :19999 — global"]
+            ndata[("Netdata config / lib / cache volumes")]
+            netdata -.-> ndata
+        end
+        traefik -->|"ingress"| public
+        public --> portainer
+        public --> litellm
+        public --> cpa
+        public --> usage
+        public --> netdata
+        litellm -->|"internal SQL"| postgres
+    end
+    clients -->|"HTTP 80 / HTTPS 443"| traefik
+```
+
+Solid arrows show the main request paths; dotted arrows show persistent storage. Network membership is listed separately below to avoid implying that every service can reach every other service. The Headroom node, its volume, and its attachments apply only when that component is selected. Backend ports are overlay targets, not additional published host ports in this topology.
+
+| Network (default physical name) | Created / owned by | Attached services in this topology |
+|---|---|---|
+| `public` | Docker CLI; no stack namespace label | Traefik, Portainer, LiteLLM, CPA, Usage Keeper, Netdata |
+| `llmproxy` (`internal: true`) | `llmproxy-data` stack | PostgreSQL, LiteLLM, CPA, Usage Keeper, optional Headroom |
+| `monitoring` | `monitoring` stack | Netdata; PostgreSQL, LiteLLM, CPA and optional Headroom through monitoring overlays |
+| `portainer_agent-network` | `portainer` stack | Portainer and Agent |
+
+- **Independent network:** create `public` with Docker CLI before deploying any consumer. Portainer and Traefik both use `external: true`; neither creates or owns it. For stack updates, reuse the existing network; deployment does not recreate or relabel it.
+- **Persistent state:** preserve the existing ACME volume on `TRAEFIK_NODE_ID`. Portainer, PostgreSQL, CPA, Usage Keeper, Netdata, and optional Headroom retain their own declared volumes. Docker socket/host bind mounts and Docker config objects are omitted from the diagram for readability; their manifests remain authoritative.
+- **Scope:** application/monitoring network names can be overridden through their declared environment variables. Usage Keeper is not attached to the monitoring network by this repository. The diagram does not change preset selection or publish extra ports.
+
 ## Presets
 
 | Preset | Selection |
@@ -75,9 +143,10 @@ See:
 | `llmproxy` | PostgreSQL, LiteLLM, CLIProxyAPI, usage UI, Headroom + Traefik |
 | `all` | Current full topology: `llmproxy` + Netdata + monitoring overlays |
 | `default` | `all` minus the Headroom component and its LiteLLM guardrail |
-| `portainer` | Portainer, Portainer Agent, and their dedicated Traefik ingress |
+| `portainer` | Portainer + Portainer Agent, no ingress service |
+| `traefik` | Shared ingress using the independent external `public` overlay and existing ACME volume |
 
-`portainer` is an independent preset. It is not inherited by `all` or any other preset and must be selected explicitly.
+`portainer` and `traefik` are independent presets, not inherited by `all` or the LiteLLM presets. Select each explicitly. The `traefik` feature on application presets only adds routing labels; it does not deploy the ingress service.
 
 Preset inheritance can subtract an inherited component with `exclude_components`. The
 exclusion removes all resources owned by that component: Compose services, overlays,
@@ -132,6 +201,8 @@ Inspect the independently selected Portainer stack without changing live state:
 uv run llmproxy validate --preset portainer
 uv run llmproxy render --preset portainer --no-local-overrides
 uv run llmproxy deploy --preset portainer --driver docker --dry-run
+uv run llmproxy render --preset traefik --no-local-overrides
+uv run llmproxy deploy --preset traefik --driver docker --dry-run
 ```
 
 Deploying a smaller preset under an existing stack name can remove services when `--allow-remove-services` enables Docker `--prune`. `ptctools` requires this acknowledgement because it cannot perform the same remote service-inventory preflight.
@@ -208,7 +279,7 @@ Keep them mode `0600`. Public examples and schemas remain tracked.
 
 `compose.local.example.yaml` is an explicit public exception: Git and packages retain it, but rendering never loads it automatically. Copy it to `compose.local.yaml` in the same component directory to activate a private override. Other `*.local*` files and private directories remain excluded.
 
-The same root `.env` also owns `PORTAINER_HOST`, `CF_DNS_API_TOKEN`, and `LETSENCRYPT_EMAIL`; they are required only when the independent `portainer` preset is selected.
+The same root `.env` owns `PORTAINER_HOST` for the `portainer` preset, and `CF_DNS_API_TOKEN`, `LETSENCRYPT_EMAIL`, and `TRAEFIK_NODE_ID` for the `traefik` preset. Set `TRAEFIK_NODE_ID` to the node holding the existing `portainer_traefik-letsencrypt-data` volume. Traefik reuses that volume. All stacks, including Portainer and Traefik, consume `public` as an external overlay. Create the network separately with Docker CLI before deploying any consumer; no stack owns or creates it. See [Deployment](docs/deployment.md) for bootstrap prerequisites and stack updates; existing shared networks are reused, not recreated. Before deployment, the operator must verify that the selected node already holds the intended ACME data: Swarm can create an empty local volume if it is missing there, even with an external declaration. See [Deployment](docs/deployment.md) for bootstrap and the `/opt/portainer` / `/opt/traefix` operator layout.
 
 ## Installed wheel
 

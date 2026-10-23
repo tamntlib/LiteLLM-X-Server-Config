@@ -48,7 +48,7 @@ excluding a multi-service component omits every service and resource it owns.
 
 A component directory appearing on disk does not add it to any preset. This prevents experimental components from entering `all` automatically.
 
-The `portainer` preset explicitly selects only `portainer/portainer`. It is independent of the LiteLLM preset hierarchy, is not inherited by `all`, and must be selected by name.
+The `portainer` preset selects only `portainer/portainer` (Agent + Portainer). The independent `traefik` preset selects only `traefik/traefik` (ingress). Neither is inherited by `all` or the LiteLLM preset hierarchy. Application presets' `traefik` feature enables routing overlays, not deployment of the ingress stack. Every ingress consumer, including Traefik and Portainer, requires the independent external `public` overlay to be created by Docker CLI first. Traefik also requires its certificate volume/node prerequisite. No preset creates `public` and no network-owner ordering dependency exists between the management and ingress components. Stack updates reuse the existing external network; presets do not recreate or change ownership of shared infrastructure.
 
 ## Current hierarchy
 
@@ -61,6 +61,7 @@ litellm-only
 └── litellm-standalone
 
 portainer
+traefik
 ```
 
 List and inspect:
@@ -69,6 +70,7 @@ List and inspect:
 uv run llmproxy presets
 uv run llmproxy inputs --preset default
 uv run llmproxy inputs --preset portainer
+uv run llmproxy inputs --preset traefik
 ```
 
 Dependency validation ensures every component named by `requires` is present in the resolved preset. Cycles, unknown presets, and unknown components fail before rendering or deployment.
