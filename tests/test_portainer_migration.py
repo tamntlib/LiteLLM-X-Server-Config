@@ -31,8 +31,8 @@ EXISTING_PRESETS = {
         "stacks": ("monitoring", "llmproxy-data", "llmproxy"),
         "hashes": {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
-            "llmproxy-data": "ca146c25f981697f0d5447a86880b6d9a50a250d0b4bf5ab622ebecf3693a949",
-            "llmproxy": "93e248ed0b849d1a60e0f9b8bb77630d94181b9a08e47aa53d19ef950af97cc9",
+            "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
+            "llmproxy": "d4a28374ef825ca1d98f8dc9a58c72dcda9d90111788020462c8e911f268c04b",
         },
     },
     "litellm-only": {
@@ -40,8 +40,8 @@ EXISTING_PRESETS = {
         "features": (),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "00d00a6dfad857f984b9b096ff994da367e858818c28bcebefd8aaf32c102eaf",
-            "llmproxy": "92e84c1fd3dfc6609d2dc677f5457c09ddc7df93fd258a95ae9d0bdc42546447",
+            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy": "12282f54e8d6aebf0ffdd716c86845abe688ad9a1c259285d1224a3aede5918f",
         },
     },
     "litellm-standalone": {
@@ -49,8 +49,8 @@ EXISTING_PRESETS = {
         "features": ("publish",),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "00d00a6dfad857f984b9b096ff994da367e858818c28bcebefd8aaf32c102eaf",
-            "llmproxy": "4af9a62aad3abd07f5048bba8b4f2e7fe142d1f4cb9aaf02665ec161846f43e8",
+            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy": "7ca2b49016ffeb73b30ea4b5aa642825c2169a7ffae17d5fbc2af0cb8dbdcb41",
         },
     },
     "litellm-traefik": {
@@ -58,8 +58,8 @@ EXISTING_PRESETS = {
         "features": ("traefik",),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "00d00a6dfad857f984b9b096ff994da367e858818c28bcebefd8aaf32c102eaf",
-            "llmproxy": "dfb76daf2b06f99e26691de4ccaadbba1d8aec2bf5936204cc5f49f704b39306",
+            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy": "ee159d9cfc3a656e333fa97a4d3bc5fbe7cec019d8c3b3e80ed24afc292d79e7",
         },
     },
     "llmproxy": {
@@ -73,8 +73,8 @@ EXISTING_PRESETS = {
         "features": ("traefik",),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "00d00a6dfad857f984b9b096ff994da367e858818c28bcebefd8aaf32c102eaf",
-            "llmproxy": "a3ff52dc246c94d4acdb9ca1a0d3855c7fd016a6ddd3aea679e381a91a0e5fb6",
+            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy": "706dd47141a8aca7b03de7fef16eb87b6953585b1576409c43fe713339a7fa49",
         },
     },
 }
@@ -95,8 +95,8 @@ ALL_PUBLIC_PRESETS = {
         "stacks": ("monitoring", "llmproxy-data", "llmproxy"),
         "hashes": {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
-            "llmproxy-data": "ca146c25f981697f0d5447a86880b6d9a50a250d0b4bf5ab622ebecf3693a949",
-            "llmproxy": "9a6c59facc86a7d15809f3f706fe3c6ac4e19c87a866d61b2ff3e4510f86977b",
+            "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
+            "llmproxy": "13c76825de5a07ae69fce3c7a8c231678fbd7aaa631f116998eb8afaa34ddbda",
         },
     },
     "portainer": {

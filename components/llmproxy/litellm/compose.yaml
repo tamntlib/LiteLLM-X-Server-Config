@@ -1,7 +1,7 @@
 services:
   litellm:
     image: tamntlib/litellm-database
-    command: ["--config", "/app/config.yaml", "--num_workers", "1", "--use_v2_migration_resolver"]
+    command: ["--config", "/app/config.yaml", "--num_workers", "1"]
     environment:
       DATABASE_URL: "postgresql://${DB_USER:-app}:${DB_PASSWORD:-app_db_PW@2018}@${DB_HOST:-llmproxy-data_db}:5432/${DB_NAME:-app}"
       STORE_MODEL_IN_DB: "True"
@@ -17,11 +17,9 @@ services:
       LITELLM_LOGGER_AWS_ACCESS_KEY_ID: ${LITELLM_LOGGER_AWS_ACCESS_KEY_ID:-}
       LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY: ${LITELLM_LOGGER_AWS_SECRET_ACCESS_KEY:-}
       JSON_LOGS: "True"
-      USE_PRISMA_MIGRATE: "True"
       LITELLM_DROP_PARAMS: "True"
       LITELLM_DISABLE_NO_REDIS_WARNING: "${LITELLM_DISABLE_NO_REDIS_WARNING:-true}"
-      CLAUDE_CODE_MODELS: ${CLAUDE_CODE_MODELS:-claude-*}
-      CLAUDE_CODE_MIN_VERSION: "${CLAUDE_CODE_MIN_VERSION:-2.1.140}"
+      MODEL_CLIENT_RESTRICTIONS: "${MODEL_CLIENT_RESTRICTIONS-claude-*:claude-cli/2.1.309,Claude/3.6556.2;gpt-*:codex-tui/0.164.0,Codex Desktop/0.163.0}"
       ANTHROPIC_ONLY_MODELS: ${ANTHROPIC_ONLY_MODELS:-anthropic/*,claude-*}
       OPENAI_ONLY_MODELS: ${OPENAI_ONLY_MODELS:-openai/*,gpt-*}
       LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/a-0,anthropic/a-1,anthropic/a-2,openai/o-0,openai/o-1,openai/o-2}
