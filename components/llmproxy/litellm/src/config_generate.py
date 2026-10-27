@@ -649,7 +649,7 @@ def resolve_provider_models_with_alias_targets(
             iface_models = {**provider_default_models, **interface_models}
             # Interface-level setting overrides provider-level default
             autofill_disabled = iface.get("models_autofill_disabled", provider_autofill_disabled)
-            model_name_prefix = iface.get("model_name_prefix") if iface.get("model_name_prefix") is not None else f"{provider}/"
+            model_name_prefix = iface.get("model_name_prefix") or ""
             models_api_base = _get_interface_models_api_base(provider_config, iface)
 
             # Auto-discover models from API unless autofill is disabled
@@ -1338,6 +1338,7 @@ def _validate_complete_config_shape(config: dict, base_config: dict) -> None:
             if (
                 field in value
                 and not isinstance(value[field], str)
+                and not (field == "model_name_prefix" and value[field] is None)
             ):
                 raise ModelDiscoveryError(f"{label} {field} must be a string")
 

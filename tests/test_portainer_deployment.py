@@ -32,7 +32,7 @@ EXISTING_PRESETS = {
         "hashes": {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
             "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
-            "llmproxy": "d4a28374ef825ca1d98f8dc9a58c72dcda9d90111788020462c8e911f268c04b",
+            "llmproxy": "4082e16d62d462a4742418540782e24e338efbe035f7a13052eeb67ae45782c2",
         },
     },
     "litellm-only": {
@@ -41,7 +41,7 @@ EXISTING_PRESETS = {
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
             "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
-            "llmproxy": "12282f54e8d6aebf0ffdd716c86845abe688ad9a1c259285d1224a3aede5918f",
+            "llmproxy": "0972d67b1cbdc15b522de094083cc8efa858becb25b64fa4b4a4a60d0a534784",
         },
     },
     "litellm-standalone": {
@@ -50,7 +50,7 @@ EXISTING_PRESETS = {
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
             "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
-            "llmproxy": "7ca2b49016ffeb73b30ea4b5aa642825c2169a7ffae17d5fbc2af0cb8dbdcb41",
+            "llmproxy": "e91b071df07883dc7f976ef22f5d617e5ecf86a2630a780cce251d7adffd2159",
         },
     },
     "litellm-traefik": {
@@ -59,7 +59,7 @@ EXISTING_PRESETS = {
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
             "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
-            "llmproxy": "ee159d9cfc3a656e333fa97a4d3bc5fbe7cec019d8c3b3e80ed24afc292d79e7",
+            "llmproxy": "b141d20ea95ca88d622684aab935827718d01e751426461a16a11b40fa718cdb",
         },
     },
     "llmproxy": {
@@ -74,7 +74,7 @@ EXISTING_PRESETS = {
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
             "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
-            "llmproxy": "706dd47141a8aca7b03de7fef16eb87b6953585b1576409c43fe713339a7fa49",
+            "llmproxy": "b76ad70ea71b8187a8e757e98877ccb83f44b56f28080547032f95a6d6520f19",
         },
     },
 }
@@ -96,7 +96,7 @@ ALL_PUBLIC_PRESETS = {
         "hashes": {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
             "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
-            "llmproxy": "13c76825de5a07ae69fce3c7a8c231678fbd7aaa631f116998eb8afaa34ddbda",
+            "llmproxy": "801faabf97ca953656258da2af2e38793b9c2770addc8704219e654a7932f974",
         },
     },
     "portainer": {

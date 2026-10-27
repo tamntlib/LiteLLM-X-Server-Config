@@ -891,26 +891,26 @@ class ResolveProviderModelsTest(unittest.TestCase):
 
         by_name = {model["model_name"]: model for model in models}
         self.assertEqual(
-            by_name["openai/gpt-5.5"]["model_info"]["max_input_tokens"],
+            by_name["gpt-5.5"]["model_info"]["max_input_tokens"],
             272000,
         )
         self.assertEqual(
-            by_name["openai/gpt-5.5"]["model_info"]["max_output_tokens"],
+            by_name["gpt-5.5"]["model_info"]["max_output_tokens"],
             32000,
         )
         self.assertTrue(
-            by_name["openai/gpt-5.5"]["model_info"]["supports_vision"]
+            by_name["gpt-5.5"]["model_info"]["supports_vision"]
         )
         self.assertEqual(
-            by_name["openai/gpt-5.5"]["litellm_params"]["timeout"],
+            by_name["gpt-5.5"]["litellm_params"]["timeout"],
             600,
         )
         self.assertEqual(
-            by_name["openai/primary"]["model_info"]["max_input_tokens"],
+            by_name["primary"]["model_info"]["max_input_tokens"],
             128000,
         )
         self.assertEqual(
-            by_name["openai/primary"]["model_info"]["max_output_tokens"],
+            by_name["primary"]["model_info"]["max_output_tokens"],
             32000,
         )
 
@@ -972,8 +972,9 @@ class ResolveProviderModelsTest(unittest.TestCase):
                     }
                 },
                 "interfaces": {
-                    "anthropic": {},
+                    "anthropic": {"model_name_prefix": "anthropic/"},
                     "openai": {
+                        "model_name_prefix": "openai/",
                         "models": {
                             "gpt-5.5": {
                                 "model_info": {
@@ -1025,7 +1026,7 @@ class ResolveProviderModelsTest(unittest.TestCase):
             models, _ = resolve_provider_models(providers, {})
 
         self.assertEqual(len(models), 1)
-        self.assertEqual(models[0]["model_name"], "openai/discovered")
+        self.assertEqual(models[0]["model_name"], "discovered")
         self.assertEqual(models[0]["model_info"]["max_input_tokens"], 272000)
 
     def test_generated_model_alias_inherits_provider_default_model(self):
@@ -1094,11 +1095,11 @@ class ResolveProviderModelsTest(unittest.TestCase):
 
         by_name = {model["model_name"]: model for model in models}
         self.assertEqual(
-            by_name["openai/gpt-5.5"]["model_info"]["access_groups"],
+            by_name["gpt-5.5"]["model_info"]["access_groups"],
             ["General1"],
         )
         self.assertEqual(
-            by_name["openai/primary"]["model_info"]["access_groups"],
+            by_name["primary"]["model_info"]["access_groups"],
             ["General"],
         )
 
@@ -1123,11 +1124,11 @@ class ResolveProviderModelsTest(unittest.TestCase):
 
         by_name = {model["model_name"]: model for model in models}
         self.assertEqual(
-            by_name["openai/gpt-5.5"]["model_info"]["access_groups"],
+            by_name["gpt-5.5"]["model_info"]["access_groups"],
             ["General"],
         )
         self.assertEqual(
-            by_name["openai/primary"]["model_info"]["access_groups"],
+            by_name["primary"]["model_info"]["access_groups"],
             ["General"],
         )
 
@@ -1146,7 +1147,7 @@ class ResolveProviderModelsTest(unittest.TestCase):
                     }
                 },
                 "interfaces": {
-                    "openai": {},
+                    "openai": {"model_name_prefix": "openai/"},
                 },
             }
         }
@@ -1156,7 +1157,7 @@ class ResolveProviderModelsTest(unittest.TestCase):
         by_name = {model["model_name"]: model for model in models}
         self.assertIn("gpt-5.5", by_name)
         self.assertIn("primary", by_name)
-        # Model-level prefix "" should override interface default "openai/"
+        # Model-level prefix "" should override the explicit interface prefix.
         self.assertNotIn("openai/gpt-5.5", by_name)
         self.assertNotIn("openai/primary", by_name)
 
@@ -1177,7 +1178,7 @@ class ResolveProviderModelsTest(unittest.TestCase):
                     }
                 },
                 "interfaces": {
-                    "openai": {},
+                    "openai": {"model_name_prefix": "openai/"},
                 },
             }
         }
@@ -1185,12 +1186,12 @@ class ResolveProviderModelsTest(unittest.TestCase):
         models, _ = resolve_provider_models(providers, {})
 
         by_name = {model["model_name"]: model for model in models}
-        # $self uses interface default prefix
+        # $self uses the explicit interface prefix.
         self.assertIn("openai/gpt-5.5", by_name)
-        # per-entry prefix "" overrides interface default
+        # Per-entry prefix "" overrides the explicit interface prefix.
         self.assertIn("claude-opus-*", by_name)
         self.assertNotIn("openai/claude-opus-*", by_name)
-        # primary uses interface default prefix
+        # primary uses the explicit interface prefix.
         self.assertIn("openai/primary", by_name)
 
     def test_model_name_prefix_not_leaked_into_model_info(self):
@@ -1415,9 +1416,9 @@ class ResolveProviderModelsTest(unittest.TestCase):
     def test_generate_config_marks_wildcard_aliases_hidden(self):
         config = self._base_config()
         config["aliases"] = {
-            "gpt-*": "openai/gpt-5.5",
-            "claude-*": {"model": "openai/gpt-5.5", "hidden": False},
-            "stable": "openai/gpt-5.5",
+            "gpt-*": "gpt-5.5",
+            "claude-*": {"model": "gpt-5.5", "hidden": False},
+            "stable": "gpt-5.5",
         }
 
         with patch(f"{generator.__name__}.validate_prices"):
@@ -1426,15 +1427,15 @@ class ResolveProviderModelsTest(unittest.TestCase):
         self.assertEqual(
             generated["aliases"],
             {
-                "gpt-*": {"model": "openai/gpt-5.5", "hidden": True},
-                "claude-*": {"model": "openai/gpt-5.5", "hidden": True},
-                "stable": "openai/gpt-5.5",
+                "gpt-*": {"model": "gpt-5.5", "hidden": True},
+                "claude-*": {"model": "gpt-5.5", "hidden": True},
+                "stable": "gpt-5.5",
             },
         )
 
     def test_generated_hidden_aliases_round_trip(self):
         config = self._base_config()
-        config["aliases"] = {"gpt-*": "openai/gpt-5.5"}
+        config["aliases"] = {"gpt-*": "gpt-5.5"}
 
         with patch(f"{generator.__name__}.validate_prices"):
             generated = generate_config(config, require_complete=True)

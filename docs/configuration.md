@@ -24,6 +24,21 @@ The owning component's `src/` package contains `__init__.py`, `config_generate.p
 
 An unselected component's local layer is never loaded. For `--config path/to/config.json`, only the custom base's sibling `config.local.json` is considered.
 
+Client-visible model names have no interface prefix by default. At
+`providers.<provider>.interfaces.<interface>.model_name_prefix`, omission, `null`,
+or `""` leaves the name unchanged (for example, `o-0` or `a-0`). Set an explicit
+string such as `"openai/"` to opt into prefixing. Model-level and per-name
+`model_name_prefix` string overrides still take precedence. This affects only
+`model_name`; backend `litellm_params.model` retains the interface prefix needed
+to select the adapter, such as `openai/o-0` or `anthropic/a-0`.
+
+When migrating from the previous interface-prefixed default, update routing
+alias targets, fallback references, public-model-hub entries, and client model
+selections or name-based access policies to match the new names. Explicit alias
+keys are not renamed. Names previously separated by interface now share a model
+group unless an explicit prefix is configured; backend targets in `model_aliases`
+remain interface-qualified. Changing files does not synchronize live state.
+
 `exclude_components` is applied before configuration-layer selection. Therefore
 `default` does not load the Headroom public or local layer and does not generate
 the `headroom-compression` guardrail.

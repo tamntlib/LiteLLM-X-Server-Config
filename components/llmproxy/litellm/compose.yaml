@@ -19,10 +19,10 @@ services:
       JSON_LOGS: "True"
       LITELLM_DROP_PARAMS: "True"
       LITELLM_DISABLE_NO_REDIS_WARNING: "${LITELLM_DISABLE_NO_REDIS_WARNING:-true}"
-      MODEL_CLIENT_RESTRICTIONS: "${MODEL_CLIENT_RESTRICTIONS-claude-*:claude-cli/2.1.309,Claude/3.6556.2;gpt-*:codex-tui/0.164.0,Codex Desktop/0.163.0}"
-      ANTHROPIC_ONLY_MODELS: ${ANTHROPIC_ONLY_MODELS:-anthropic/*,claude-*}
-      OPENAI_ONLY_MODELS: ${OPENAI_ONLY_MODELS:-openai/*,gpt-*}
-      LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-anthropic/a-0,anthropic/a-1,anthropic/a-2,openai/o-0,openai/o-1,openai/o-2}
+      MODEL_CLIENT_RESTRICTIONS: "${MODEL_CLIENT_RESTRICTIONS-claude-*:claude-cli/2.1.309,Claude/3.6556.2;gpt-*:codex-tui/0.164.0,Codex Desktop/0.164.0,codex_vscode/0.164.0}"
+      ANTHROPIC_ONLY_MODELS: ${ANTHROPIC_ONLY_MODELS:-a-*,claude-*}
+      OPENAI_ONLY_MODELS: ${OPENAI_ONLY_MODELS:-o-*,gpt-*}
+      LITELLM_VISION_MODEL_ROUTER_MODELS: ${LITELLM_VISION_MODEL_ROUTER_MODELS:-a-0,a-1,a-2,a-3,a-fallback,o-0,o-1,o-2,o-3,o-fallback}
     configs:
       - source: litellm-config-yaml
         target: /app/config.yaml
