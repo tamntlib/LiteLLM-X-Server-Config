@@ -1,4 +1,4 @@
-"""Source-owned Claude/GPT model alias updater contracts (no live API calls)."""
+"""Source-owned Claude/GPT model config refresher contracts (no live API calls)."""
 
 from email.message import Message
 import importlib.util
@@ -12,11 +12,11 @@ from urllib.parse import parse_qs, urlparse
 import unittest
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "update_model_aliases.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "refresh_model_config.py"
 
 
 def updater():
-    spec = importlib.util.spec_from_file_location("update_model_aliases", SCRIPT)
+    spec = importlib.util.spec_from_file_location("refresh_model_config", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -330,48 +330,64 @@ class UpdateGPTAliasesTest(unittest.TestCase):
         text = ('{"aliases": {"gpt-6.2-sol": "o-1"}, '
                 '"model_name_base_model_map": {"a-fallback-vision": "openai/gpt-6.1-sol", '
                 '"o-1": "gpt-6.1-sol", "o-0-vision": "gpt-6-astra", '
-                '"a-1": "claude-opus-5", "image": "gpt-image-2.5-flare"}, '
+                '"a-1": "claude-opus-5", "image": "openai/gpt-image-2.5-flare", '
+                '"legacy_image": "gpt-image-1"}, '
                 '"other": {"base_model": "gpt-6.1-sol"}}\n')
         with tempfile.TemporaryDirectory() as temporary:
             config = Path(temporary) / "config.json"
             config.write_text(text)
-            latest = {"sol": "gpt-6.2-sol", "astra": "gpt-6.2-astra"}
+            latest = {"sol": "gpt-6.2-sol", "astra": "gpt-6.2-astra", "flare": "gpt-image-2.6-flare"}
             with patch.object(module, "fetch_latest_public", return_value=latest) as fetch:
                 args = ["--provider", "openai", "--config", str(config)]
                 with patch("sys.stdout", new_callable=io.StringIO) as output:
                     self.assertEqual(module.main([*args, "--dry-run"]), 0)
-                self.assertIn("3 base_model mappings", output.getvalue())
+                self.assertIn("4 base_model mappings", output.getvalue())
                 self.assertEqual(config.read_text(), text)
                 with patch("sys.stdout", new_callable=io.StringIO):
                     self.assertEqual(module.main([*args, "--write"]), 0)
-                fetch.assert_called_with("openai", {"sol", "astra"})
+                fetch.assert_called_with("openai", {"sol", "astra", "flare"})
             expected = text.replace('"openai/gpt-6.1-sol"', '"openai/gpt-6.2-sol"').replace(
                 '"o-1": "gpt-6.1-sol"', '"o-1": "gpt-6.2-sol"'
-            ).replace('"o-0-vision": "gpt-6-astra"', '"o-0-vision": "gpt-6.2-astra"')
+            ).replace('"o-0-vision": "gpt-6-astra"', '"o-0-vision": "gpt-6.2-astra"').replace(
+                '"openai/gpt-image-2.5-flare"', '"openai/gpt-image-2.6-flare"'
+            )
             self.assertEqual(config.read_text(), expected)
 
     def test_cli_openai_updates_aliases_and_base_models_together(self):
         module = updater()
-        text = ('{"aliases": {"gpt-6-sol": "o-1", "anthropic/gpt-6-sol": "a-1", '
+        text = ('{"providers": {"cli-proxy-api": {"interfaces": {"openai": '
+                '{"models": {"o-1": {}, "gpt-image-2.5-flare": {}, "gpt-image-2.5-sunburst": {}}}}}}, '
+                '"aliases": {"gpt-6-sol": "o-1", "anthropic/gpt-6-sol": "a-1", '
                 '"claude-opus-5": "a-1", "gpt-*": "o-1", '
-                '"gpt-image-2.5-flare": "gpt-image-2.5-flare"}, '
+                '"gpt-image-*": "gpt-image-2.5-flare", '
+                '"gpt-image-2.5-flare": "gpt-image-2.5-flare", '
+                '"gpt-image-2.5-sunburst": {"model": "gpt-image-2.5-sunburst", "hidden": true}}, '
                 '"model_name_base_model_map": {"o-1": "gpt-6-sol"}}\n')
         with tempfile.TemporaryDirectory() as temporary:
             config = Path(temporary) / "config.json"
             config.write_text(text)
-            with patch.object(module, "fetch_latest_openai", return_value={"sol": "gpt-6.1-sol"}) as fetch:
+            latest = {
+                "sol": "gpt-6.1-sol",
+                "flare": "gpt-image-2.6-flare",
+                "sunburst": "gpt-image-2.6-sunburst",
+            }
+            with patch.object(module, "fetch_latest_openai", return_value=latest) as fetch:
                 with patch.object(module, "fetch_latest") as anthropic:
                     with patch("sys.stdout", new_callable=io.StringIO) as output:
                         self.assertEqual(module.main(["--source", "api", "--provider", "openai", "--config", str(config)]), 0)
                     self.assertEqual(config.read_text(), text)
-                    self.assertIn("Dry run: 2 aliases", output.getvalue())
+                    self.assertIn("Dry run: 4 aliases, 3 alias targets, 2 provider models and 1 base_model mappings", output.getvalue())
                     with patch("sys.stdout", new_callable=io.StringIO):
                         self.assertEqual(module.main(["--source", "api", "--provider", "openai", "--config", str(config), "--write"]), 0)
                     anthropic.assert_not_called()
-                self.assertEqual(fetch.call_args.args[1], {"sol"})
-            expected = text.replace('"gpt-6-sol":', '"gpt-6.1-sol":').replace(
-                '"anthropic/gpt-6-sol":', '"anthropic/gpt-6.1-sol":').replace(
-                '"o-1": "gpt-6-sol"', '"o-1": "gpt-6.1-sol"')
+                self.assertEqual(fetch.call_args.args[1], {"sol", "flare", "sunburst"})
+            expected = (
+                text.replace('"gpt-6-sol":', '"gpt-6.1-sol":')
+                .replace('"anthropic/gpt-6-sol":', '"anthropic/gpt-6.1-sol":')
+                .replace('"o-1": "gpt-6-sol"', '"o-1": "gpt-6.1-sol"')
+                .replace('"gpt-image-2.5-flare"', '"gpt-image-2.6-flare"')
+                .replace('"gpt-image-2.5-sunburst"', '"gpt-image-2.6-sunburst"')
+            )
             self.assertEqual(config.read_text(), expected)
 
     def test_all_mode_writes_both_providers_once_and_is_idempotent(self):
@@ -436,22 +452,112 @@ class UpdateGPTAliasesTest(unittest.TestCase):
         config = SCRIPT.parents[1] / "integrations/llmproxy/litellm/config.json"
         text = config.read_text()
         # Synthetic future catalogue fixture, not a claim of live availability.
-        latest = {line: f"gpt-7-{line}" for line in ("astra", "sol", "terra", "luna")}
+        latest = {
+            **{line: f"gpt-7-{line}" for line in ("astra", "sol", "terra", "luna")},
+            "flare": "gpt-image-3-flare",
+            "sunburst": "gpt-image-3-sunburst",
+        }
         self.assertEqual(module.required_lines(text, "openai"), set(latest))
         updated, changes = module.update_aliases(text, latest, "openai")
-        self.assertEqual(len(changes), 8)
+        updated, target_changes = module.update_alias_targets(updated, latest, "openai")
+        updated, provider_changes = module.update_provider_models(updated, latest, "openai")
+        self.assertEqual(len(changes), 10)
+        self.assertEqual(len(target_changes), 3)
+        self.assertEqual(len(provider_changes), 2)
         before = json.loads(text)
         after = json.loads(updated)
-        expected = dict(before)
-        renames = dict(changes)
-        expected["aliases"] = {renames.get(key, key): value for key, value in before["aliases"].items()}
-        self.assertEqual(after, expected)
         for prefix, target in (("", "o"), ("anthropic/", "a")):
             for index, line in enumerate(("astra", "sol", "terra", "luna")):
                 self.assertEqual(after["aliases"][prefix + latest[line]], f"{target}-{index}")
+        self.assertEqual(after["aliases"]["gpt-image-*"], "gpt-image-3-flare")
+        self.assertEqual(after["aliases"]["gpt-image-3-flare"], "gpt-image-3-flare")
+        self.assertEqual(after["aliases"]["gpt-image-3-sunburst"], "gpt-image-3-sunburst")
+        openai_models = after["providers"]["cli-proxy-api"]["interfaces"]["openai"]["models"]
+        self.assertIn("gpt-image-3-flare", openai_models)
+        self.assertIn("gpt-image-3-sunburst", openai_models)
+        self.assertEqual(len(openai_models), len(before["providers"]["cli-proxy-api"]["interfaces"]["openai"]["models"]))
         collision = '{"aliases":{"gpt-6-sol":"o-1","gpt-7-sol":"o-2"}}'
         with self.assertRaisesRegex(ValueError, "collision"):
             module.update_aliases(collision, latest, "openai")
+        provider_collision = ('{"providers":{"p":{"interfaces":{"openai":{"models":'
+                              '{"gpt-image-2.5-flare":{},"gpt-image-3-flare":{}}}}}},'
+                              '"aliases":{}}')
+        with self.assertRaisesRegex(ValueError, "collision"):
+            module.update_provider_models(provider_collision, latest, "openai")
+
+    def test_public_openai_reads_image_models_from_full_catalog_highest_version(self):
+        module = updater()
+        document = ('# Models\n## Featured models\n'
+                    '- [GPT Sol](/api/docs/models/gpt-6.2-sol.md): Current\n'
+                    '## Browse our full catalog of models\n'
+                    '- [Historical GPT](/api/docs/models/gpt-99-sol.md): Excluded for text\n'
+                    '- [Image 2.5 Flare](/api/docs/models/gpt-image-2.5-flare.md): Old\n'
+                    '- [Image 2.9 Flare](/api/docs/models/gpt-image-2.9-flare.md): Newer\n'
+                    '- [Image 2.10 Flare](/api/docs/models/gpt-image-2.10-flare.md): Highest\n'
+                    '- [Image Preview](/api/docs/models/gpt-image-99-flare-preview.md): Excluded\n'
+                    '- [Image 2.5 Sunburst](/api/docs/models/gpt-image-2.5-sunburst.md): Old\n'
+                    '- [Image 2.6 Sunburst](/api/docs/models/gpt-image-2.6-sunburst.md): Highest\n')
+
+        def open_document(request, timeout):
+            return io.BytesIO(document.encode())
+
+        latest = module.fetch_latest_public("openai", {"sol", "flare", "sunburst"}, open_url=open_document)
+        self.assertEqual(latest, {
+            "sol": "gpt-6.2-sol",
+            "flare": "gpt-image-2.10-flare",
+            "sunburst": "gpt-image-2.6-sunburst",
+        })
+        # Image-only lookup does not require Featured models.
+        image_only_doc = ('## Browse our full catalog of models\n'
+                          '- [Image](/api/docs/models/gpt-image-2.6-flare.md): Current\n')
+        self.assertEqual(
+            module.fetch_latest_public("openai", {"flare"}, open_url=lambda r, timeout: io.BytesIO(image_only_doc.encode())),
+            {"flare": "gpt-image-2.6-flare"},
+        )
+
+    def test_public_openai_image_errors_fail_closed(self):
+        module = updater()
+        documents = [
+            "## Featured models\n- [GPT Sol](/api/docs/models/gpt-6.2-sol.md): Current\n",
+            "## Browse our full catalog of models\n- [Preview](/api/docs/models/gpt-image-2.6-flare-preview.md): Preview\n",
+            "## Browse our full catalog of models\n"
+            "- [A](/api/docs/models/gpt-image-2.6-flare.md): A\n"
+            "- [B](/api/docs/models/gpt-image-2.06-flare.md): Tie\n",
+        ]
+        for document in documents:
+            with self.subTest(document=document):
+                with self.assertRaises(module.UpdateError):
+                    module.fetch_latest_public(
+                        "openai", {"flare"}, open_url=lambda r, timeout: io.BytesIO(document.encode())
+                    )
+
+    def test_image_targets_and_provider_models_ignore_text_routes_and_reject_invalid_structure(self):
+        module = updater()
+        text = ('{"providers":{"cli-proxy-api":{"interfaces":{"openai":{"models":'
+                '{"gpt-6-sol":{},"gpt-image-2.5-flare":{}}}}}},'
+                '"aliases":{"gpt-6-sol":"o-1","pinned":"gpt-6-sol",'
+                '"gpt-image-*":{"model":"gpt-image-2.5-flare","hidden":true}}}\n')
+        latest = {"sol": "gpt-6.2-sol", "flare": "gpt-image-2.6-flare"}
+        after_targets, target_changes = module.update_alias_targets(text, latest, "openai")
+        self.assertEqual(target_changes, [("gpt-image-*", "gpt-image-2.5-flare", "gpt-image-2.6-flare")])
+        self.assertEqual(json.loads(after_targets)["aliases"]["pinned"], "gpt-6-sol")
+        after_models, model_changes = module.update_provider_models(after_targets, latest, "openai")
+        self.assertEqual(model_changes, [("cli-proxy-api/openai", "gpt-image-2.5-flare", "gpt-image-2.6-flare")])
+        models = json.loads(after_models)["providers"]["cli-proxy-api"]["interfaces"]["openai"]["models"]
+        self.assertIn("gpt-6-sol", models)
+        self.assertIn("gpt-image-2.6-flare", models)
+        self.assertNotIn("gpt-image-2.5-flare", models)
+        # Cross-family substitution is rejected.
+        with self.assertRaisesRegex(module.UpdateError, "invalid latest model"):
+            module.update_provider_models(text, {"flare": "gpt-6.2-flare"}, "openai")
+        # Invalid providers or alias target structure aborts before discovery.
+        for bad in (
+            '{"providers":[],"aliases":{}}',
+            '{"providers":{"p":{"interfaces":{"openai":{"models":[]}}}},"aliases":{}}',
+            '{"aliases":{"gpt-image-*":{"model":123}}}',
+        ):
+            with self.subTest(bad=bad), self.assertRaises(module.UpdateError):
+                module.required_lines(bad, "openai")
 
     def test_openai_uses_numeric_versions_not_response_order_or_creation_time(self):
         module = updater()
@@ -461,6 +567,10 @@ class UpdateGPTAliasesTest(unittest.TestCase):
             {"id": "gpt-6.10-sol-2026-11-01", "created": 9999999999},
             {"id": "gpt-99-sol-preview", "created": 9999999999},
             {"id": "gpt-image-2.5-flare", "created": 9999999999},
+            {"id": "gpt-image-2.6-flare", "created": 1},
+            {"id": "gpt-image-2.10-flare-preview", "created": 9999999999},
+            {"id": "gpt-image-3-flare", "shutdown_date": "2000-01-01"},
+            {"id": "gpt-image-2.6-sunburst", "shutdown_date": None},
             {"id": "gpt-99-sol", "shutdown_date": "2000-01-01"},
             {"id": "gpt-7-astra", "shutdown_date": None},
         ]
@@ -471,8 +581,13 @@ class UpdateGPTAliasesTest(unittest.TestCase):
             self.assertEqual(timeout, 30)
             return io.BytesIO(json.dumps({"object": "list", "data": models}).encode())
 
-        latest = module.fetch_latest_openai("test-key", {"sol", "astra"}, open_url=open_page)
-        self.assertEqual(latest, {"sol": "gpt-6.10-sol", "astra": "gpt-7-astra"})
+        latest = module.fetch_latest_openai("test-key", {"sol", "astra", "flare", "sunburst"}, open_url=open_page)
+        self.assertEqual(latest, {
+            "sol": "gpt-6.10-sol",
+            "astra": "gpt-7-astra",
+            "flare": "gpt-image-2.6-flare",
+            "sunburst": "gpt-image-2.6-sunburst",
+        })
         self.assertEqual(requests[0].full_url, "https://api.openai.com/v1/models")
         self.assertEqual(requests[0].get_header("Authorization"), "Bearer test-key")
 

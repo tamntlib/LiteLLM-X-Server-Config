@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh Claude/GPT aliases and base_model mappings without changing routing."""
+"""Refresh Claude/GPT aliases, base_model mappings, and GPT-Image model references."""
 
 from __future__ import annotations
 
@@ -72,12 +72,39 @@ def fetch_latest(api_key, lines, *, open_url=None):
     raise UpdateError(f"No active model found for required lines: {missing}")
 
 
-GPT_MODEL = re.compile(r"gpt-(?P<version>\d+(?:\.\d+)*)-(?P<line>astra|sol|terra|luna)")
-GPT_ALIAS = re.compile(r"(?P<prefix>(?:[^/]+/)*)" + GPT_MODEL.pattern)
+GPT_TEXT_LINES = frozenset({"astra", "sol", "terra", "luna"})
+GPT_IMAGE_LINES = frozenset({"flare", "sunburst"})
+GPT_TEXT_MODEL = re.compile(r"gpt-(?P<version>\d+(?:\.\d+)*)-(?P<line>astra|sol|terra|luna)")
+GPT_IMAGE_MODEL = re.compile(r"gpt-image-(?P<version>\d+(?:\.\d+)*)-(?P<line>flare|sunburst)")
+GPT_MODEL = GPT_TEXT_MODEL
+GPT_TEXT_ALIAS = re.compile(r"(?P<prefix>(?:[^/]+/)*)" + GPT_TEXT_MODEL.pattern)
+GPT_IMAGE_ALIAS = re.compile(r"(?P<prefix>(?:[^/]+/)*)" + GPT_IMAGE_MODEL.pattern)
+GPT_ALIAS = GPT_TEXT_ALIAS
+
+
+def _match_openai_model(model_id):
+    return GPT_TEXT_MODEL.fullmatch(model_id) or GPT_IMAGE_MODEL.fullmatch(model_id)
+
+
+def _select_highest_version(candidates, lines, pattern_fn):
+    latest = {}
+    versions = {}
+    for model_id in candidates:
+        match = pattern_fn(model_id)
+        if match is None or match["line"] not in lines:
+            continue
+        line = match["line"]
+        version = tuple(int(part) for part in match["version"].split("."))
+        if line in versions and version == versions[line] and latest[line] != model_id:
+            raise UpdateError("Ambiguous OpenAI model versions for a required line")
+        if line not in versions or version > versions[line]:
+            versions[line] = version
+            latest[line] = model_id
+    return latest
 
 
 def fetch_latest_openai(api_key, lines, *, open_url=None):
-    """Select the highest numeric canonical GPT version per configured line.
+    """Select the highest numeric canonical GPT / GPT-Image version per configured line.
 
     OpenAI provides no line field or release ordering. Do not use `created`
     as a release date or mix dated snapshots/previews into canonical aliases.
@@ -93,15 +120,14 @@ def fetch_latest_openai(api_key, lines, *, open_url=None):
         page = json.load(response)
     if not isinstance(page, dict) or page.get("object") != "list" or not isinstance(page.get("data"), list):
         raise UpdateError("Invalid OpenAI Models API response")
-    latest = {}
-    versions = {}
+    candidates = []
     seen = set()
     today = datetime.now(timezone.utc).date()
     for model in page["data"]:
         if not isinstance(model, dict) or not isinstance(model.get("id"), str):
             raise UpdateError("Invalid OpenAI Models API model entry")
         model_id = model["id"]
-        match = GPT_MODEL.fullmatch(model_id)
+        match = _match_openai_model(model_id)
         if match is None or match["line"] not in lines:
             continue
         if model_id in seen:
@@ -117,11 +143,8 @@ def fetch_latest_openai(api_key, lines, *, open_url=None):
                 raise UpdateError("Invalid OpenAI model shutdown date") from exc
             if shutdown_date <= today:
                 continue
-        line = match["line"]
-        version = tuple(int(part) for part in match["version"].split('.'))
-        if line not in versions or version > versions[line]:
-            versions[line] = version
-            latest[line] = model_id
+        candidates.append(model_id)
+    latest = _select_highest_version(candidates, lines, _match_openai_model)
     missing = lines - latest.keys()
     if missing:
         raise UpdateError("No available canonical GPT model for required lines: " + ", ".join(sorted(missing)))
@@ -137,42 +160,63 @@ PUBLIC_CATALOGUES = {
     "anthropic": "https://platform.claude.com/docs/en/models/overview.md",
     "openai": "https://developers.openai.com/api/docs/models.md",
 }
+_OPENAI_MODEL_LINK = re.compile(r"(?m)^- \[[^\]\n]+\]\(/api/docs/models/([^/()]+)\.md\):")
+
+
+def _markdown_section(text, heading):
+    sections = re.findall(r"(?ms)^## " + re.escape(heading) + r"[ \t]*\r?\n(.*?)(?=^## |\Z)", text)
+    if len(sections) != 1:
+        raise UpdateError("Public catalogue must contain one " + heading + " section")
+    return sections[0]
 
 
 def fetch_latest_public(provider, lines, *, open_url=None):
-    """Read only the current-lineup section of official public Markdown docs."""
+    """Read official public Markdown docs for required model lines."""
     open_url = open_url or build_opener(_NoRedirect()).open
     request = Request(
         PUBLIC_CATALOGUES[provider],
-        headers={"Accept": "text/markdown", "User-Agent": "model-alias-updater/1.0"},
+        headers={"Accept": "text/markdown", "User-Agent": "model-config-refresher/1.0"},
     )
     with open_url(request, timeout=30) as response:
         content = response.read(1_048_577)
     if len(content) > 1_048_576:
         raise UpdateError("Public catalogue exceeds the size limit")
     text = content.decode("utf-8")
-    heading = "Featured models" if provider == "openai" else "Latest models"
-    sections = re.findall(r"(?ms)^## " + heading + r"[ \t]*\r?\n(.*?)(?=^## |\Z)", text)
-    if len(sections) != 1:
-        raise UpdateError("Public catalogue must contain one " + heading + " section")
+    latest = {}
     if provider == "openai":
-        candidates = re.findall(
-            r"(?m)^- \[[^\]\n]+\]\(/api/docs/models/([^/()]+)\.md\):", sections[0]
-        )
+        unknown = lines - (GPT_TEXT_LINES | GPT_IMAGE_LINES)
+        if unknown:
+            raise UpdateError("Unsupported OpenAI model lines: " + ", ".join(sorted(unknown)))
+        text_lines = lines & GPT_TEXT_LINES
+        image_lines = lines & GPT_IMAGE_LINES
+        if text_lines:
+            featured = _markdown_section(text, "Featured models")
+            for model_id in _OPENAI_MODEL_LINK.findall(featured):
+                match = GPT_TEXT_MODEL.fullmatch(model_id)
+                if match is None or match["line"] not in text_lines:
+                    continue
+                line = match["line"]
+                if line in latest and latest[line] != model_id:
+                    raise UpdateError("Public catalogue has ambiguous model IDs for a required line")
+                latest[line] = model_id
+        if image_lines:
+            catalog = _markdown_section(text, "Browse our full catalog of models")
+            latest.update(
+                _select_highest_version(_OPENAI_MODEL_LINK.findall(catalog), image_lines, GPT_IMAGE_MODEL.fullmatch)
+            )
     else:
-        rows = re.findall(r"(?m)^\|[ \t]*Claude API ID[ \t]*\|(.*)\|[ \t]*\r?$", sections[0])
+        section = _markdown_section(text, "Latest models")
+        rows = re.findall(r"(?m)^\|[ \t]*Claude API ID[ \t]*\|(.*)\|[ \t]*\r?$", section)
         if len(rows) != 1:
             raise UpdateError("Public catalogue must contain one Claude API ID row")
-        candidates = re.findall(r"`([^`]+)`", rows[0])
-    latest = {}
-    for model_id in candidates:
-        match = (GPT_MODEL if provider == "openai" else MODEL_ALIAS).fullmatch(model_id)
-        if match is None or match.groupdict().get("prefix") or match["line"] not in lines:
-            continue
-        line = match["line"]
-        if line in latest and latest[line] != model_id:
-            raise UpdateError("Public catalogue has ambiguous model IDs for a required line")
-        latest[line] = model_id
+        for model_id in re.findall(r"`([^`]+)`", rows[0]):
+            match = MODEL_ALIAS.fullmatch(model_id)
+            if match is None or match["prefix"] or match["line"] not in lines:
+                continue
+            line = match["line"]
+            if line in latest and latest[line] != model_id:
+                raise UpdateError("Public catalogue has ambiguous model IDs for a required line")
+            latest[line] = model_id
     if lines - latest.keys():
         raise UpdateError("Public catalogue is missing required model lines")
     return latest
@@ -210,14 +254,53 @@ def _load_config(text):
     config = json.loads(text, object_pairs_hook=_unique_object)
     if not isinstance(config, dict) or not isinstance(config.get("aliases"), dict):
         raise UpdateError("Config must contain an aliases object")
+    for alias_target in config["aliases"].values():
+        if isinstance(alias_target, dict) and "model" in alias_target and not isinstance(alias_target["model"], str):
+            raise UpdateError("Alias target model must be a string")
     base_models = config.get("model_name_base_model_map", {})
     if not isinstance(base_models, dict) or any(not isinstance(v, str) for v in base_models.values()):
         raise UpdateError("model_name_base_model_map must be an object of strings")
+    providers = config.get("providers", {})
+    if not isinstance(providers, dict):
+        raise UpdateError("providers must be an object")
+    for provider_cfg in providers.values():
+        if not isinstance(provider_cfg, dict):
+            raise UpdateError("Each provider configuration must be an object")
+        interfaces = provider_cfg.get("interfaces", {})
+        if not isinstance(interfaces, dict):
+            raise UpdateError("Provider interfaces must be an object")
+        for interface_cfg in interfaces.values():
+            if not isinstance(interface_cfg, dict):
+                raise UpdateError("Each provider interface must be an object")
+            models = interface_cfg.get("models", {})
+            if not isinstance(models, dict):
+                raise UpdateError("Provider interface models must be an object")
     return config
 
 
-def _model_pattern(provider):
-    return GPT_ALIAS if provider == "openai" else MODEL_ALIAS
+def _match_model(name, provider):
+    if provider == "openai":
+        for pattern in (GPT_TEXT_ALIAS, GPT_IMAGE_ALIAS):
+            if (match := pattern.fullmatch(name)) is not None:
+                return match, pattern
+        return None
+    if (match := MODEL_ALIAS.fullmatch(name)) is not None:
+        return match, MODEL_ALIAS
+    return None
+
+
+def _alias_target_model(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("model"), str):
+        return value["model"]
+    return None
+
+
+def _iter_provider_models(config):
+    for provider_name, provider_cfg in config.get("providers", {}).items():
+        for interface_name, interface_cfg in provider_cfg.get("interfaces", {}).items():
+            yield provider_name, interface_name, interface_cfg.get("models", {})
 
 
 def _updated_model(match, latest, pattern):
@@ -231,12 +314,20 @@ def _updated_model(match, latest, pattern):
 
 def required_lines(text, provider="anthropic"):
     config = _load_config(text)
-    pattern = _model_pattern(provider)
-    return {
-        match["line"]
-        for name in (*config["aliases"], *config.get("model_name_base_model_map", {}).values())
-        if (match := pattern.fullmatch(name))
-    }
+    lines = set()
+    for name in (*config["aliases"], *config.get("model_name_base_model_map", {}).values()):
+        if (found := _match_model(name, provider)) is not None:
+            lines.add(found[0]["line"])
+    if provider == "openai":
+        for value in config["aliases"].values():
+            target = _alias_target_model(value)
+            if target is not None and (match := GPT_IMAGE_ALIAS.fullmatch(target)) is not None:
+                lines.add(match["line"])
+        for _, _, models in _iter_provider_models(config):
+            for name in models:
+                if (match := GPT_IMAGE_ALIAS.fullmatch(name)) is not None:
+                    lines.add(match["line"])
+    return lines
 
 
 def _section_members(text, section):
@@ -248,17 +339,17 @@ def _section_members(text, section):
 
 
 def _replace_tokens(text, replacements):
-    for start, end, replacement in reversed(replacements):
+    for start, end, replacement in sorted(replacements, key=lambda item: item[0], reverse=True):
         text = text[:start] + json.dumps(replacement) + text[end:]
     return text
 
 
 def update_aliases(text, latest, provider="anthropic"):
     aliases = _load_config(text)["aliases"]
-    pattern = _model_pattern(provider)
     renames = {}
     for name in aliases:
-        if (match := pattern.fullmatch(name)) is not None:
+        if (found := _match_model(name, provider)) is not None:
+            match, pattern = found
             renamed = _updated_model(match, latest, pattern)
             if renamed != name:
                 renames[name] = renamed
@@ -276,13 +367,81 @@ def update_aliases(text, latest, provider="anthropic"):
     return _replace_tokens(text, replacements), list(renames.items())
 
 
+def update_alias_targets(text, latest, provider="openai"):
+    if provider != "openai":
+        return text, []
+    aliases = _load_config(text)["aliases"]
+    changes = {}
+    for key, value in aliases.items():
+        target = _alias_target_model(value)
+        if target is not None and (match := GPT_IMAGE_ALIAS.fullmatch(target)) is not None:
+            updated = _updated_model(match, latest, GPT_IMAGE_ALIAS)
+            if updated != target:
+                changes[key] = (target, updated)
+    if not changes:
+        return text, []
+    replacements = []
+    for key, _, _, value_start, value_end in _section_members(text, "aliases"):
+        if key not in changes:
+            continue
+        if text[value_start] == "{":
+            for field, _, _, field_start, field_end in _members(text, value_start):
+                if field == "model":
+                    replacements.append((field_start, field_end, changes[key][1]))
+                    break
+        else:
+            replacements.append((value_start, value_end, changes[key][1]))
+    return _replace_tokens(text, replacements), [(key, *pair) for key, pair in changes.items()]
+
+
+def update_provider_models(text, latest, provider="openai"):
+    if provider != "openai":
+        return text, []
+    config = _load_config(text)
+    renames_by_scope = {}
+    change_list = []
+    for provider_name, interface_name, models in _iter_provider_models(config):
+        renames = {}
+        for name in models:
+            if (match := GPT_IMAGE_ALIAS.fullmatch(name)) is not None:
+                renamed = _updated_model(match, latest, GPT_IMAGE_ALIAS)
+                if renamed != name:
+                    renames[name] = renamed
+        destinations = [renames.get(name, name) for name in models]
+        if len(destinations) != len(set(destinations)):
+            raise UpdateError("Provider model collision after update; resolve duplicate line models first")
+        if renames:
+            renames_by_scope[(provider_name, interface_name)] = renames
+            scope = f"{provider_name}/{interface_name}"
+            for old, new in renames.items():
+                change_list.append((scope, old, new))
+    if not renames_by_scope:
+        return text, []
+    replacements = []
+    for provider_name, _, _, provider_start, _ in _section_members(text, "providers"):
+        for field, _, _, field_start, _ in _members(text, provider_start):
+            if field != "interfaces":
+                continue
+            for interface_name, _, _, interface_start, _ in _members(text, field_start):
+                renames = renames_by_scope.get((provider_name, interface_name))
+                if not renames:
+                    continue
+                for iface_field, _, _, models_start, _ in _members(text, interface_start):
+                    if iface_field != "models":
+                        continue
+                    for model_key, key_start, key_end, _, _ in _members(text, models_start):
+                        if model_key in renames:
+                            replacements.append((key_start, key_end, renames[model_key]))
+    return _replace_tokens(text, replacements), change_list
+
+
 def update_base_models(text, latest, provider="anthropic"):
     section = "model_name_base_model_map"
     base_models = _load_config(text).get(section, {})
-    pattern = _model_pattern(provider)
     changes = {}
     for name, model_id in base_models.items():
-        if (match := pattern.fullmatch(model_id)) is not None:
+        if (found := _match_model(model_id, provider)) is not None:
+            match, pattern = found
             updated = _updated_model(match, latest, pattern)
             if updated != model_id:
                 changes[name] = (model_id, updated)
@@ -328,6 +487,8 @@ def main(argv=None):
         providers = ("anthropic", "openai") if args.provider == "all" else (args.provider,)
         updated = text
         changes = []
+        target_changes = []
+        provider_changes = []
         base_changes = []
         for provider in providers:
             lines = required_lines(text, provider)
@@ -339,20 +500,33 @@ def main(argv=None):
                 fetch = fetch_latest_openai if provider == "openai" else fetch_latest
                 key_name = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
                 latest = fetch(os.environ.get(key_name, ""), lines)
-            updated, provider_changes = update_aliases(updated, latest, provider)
-            changes.extend(provider_changes)
+            updated, provider_alias_changes = update_aliases(updated, latest, provider)
+            changes.extend(provider_alias_changes)
+            updated, provider_target_changes = update_alias_targets(updated, latest, provider)
+            target_changes.extend(provider_target_changes)
+            updated, provider_model_changes = update_provider_models(updated, latest, provider)
+            provider_changes.extend(provider_model_changes)
             updated, provider_base_changes = update_base_models(updated, latest, provider)
             base_changes.extend(provider_base_changes)
-        if not (changes or base_changes):
-            print("No changes needed for selected model aliases or base_model mappings.")
+        if not (changes or target_changes or provider_changes or base_changes):
+            print("No changes needed for selected model aliases, provider models, or base_model mappings.")
             return 0
         for old, new in changes:
             print(f"{old} -> {new}")
+        for key, old, new in target_changes:
+            print(f"alias_target[{key}]: {old} -> {new}")
+        for scope, old, new in provider_changes:
+            print(f"provider_model[{scope}]: {old} -> {new}")
         for key, old, new in base_changes:
             print(f"base_model[{key}]: {old} -> {new}")
-        summary = f"{len(changes)} aliases"
+        parts = [f"{len(changes)} aliases"]
+        if target_changes:
+            parts.append(f"{len(target_changes)} alias targets")
+        if provider_changes:
+            parts.append(f"{len(provider_changes)} provider models")
         if base_changes:
-            summary += f" and {len(base_changes)} base_model mappings"
+            parts.append(f"{len(base_changes)} base_model mappings")
+        summary = ", ".join(parts[:-1]) + " and " + parts[-1] if len(parts) > 1 else parts[0]
         if args.write:
             if path.read_bytes() != original:
                 raise UpdateError("Config changed during discovery; rerun before writing")
