@@ -63,6 +63,70 @@ Use a custom base when required:
 uv run llmproxy llmproxy/litellm config generate --config path/to/config.json --output build/llmproxy/litellm/custom.json
 ```
 
+## Refresh Claude and GPT model aliases
+
+`components/llmproxy/cli-proxy-api/scripts/update_model_aliases.py` refreshes
+concrete model alias keys and `model_name_base_model_map` values in that component's
+`integrations/llmproxy/litellm/config.json`. The default `--source public` reads
+official public Markdown catalogues and **does not require an API key**:
+
+- Claude: the `Claude API ID` row in `Latest models` at
+  <https://platform.claude.com/docs/en/models/overview.md>.
+- GPT: canonical model links in `Featured models` at
+  <https://developers.openai.com/api/docs/models.md>.
+
+Only these current-lineup sections are used, not historical lists or prose
+mentions. Each required family must have one unambiguous canonical ID. Missing
+sections/families, layout changes, HTTP errors, or documents larger than 1 MiB
+abort without changing the config; there is no silent API or stale-ID fallback.
+Public discovery follows the published lineup, not the models available to a
+particular account, and does not prove the gateway serves those models.
+
+Run from the repository root (standard library and checkout only; no package
+installation or credential environment required):
+
+```bash
+docker run --rm --cpus 1 --memory 256m \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  --mount "type=bind,src=$PWD,dst=/workspace" --workdir /workspace \
+  python:3.11-slim-bookworm \
+  python components/llmproxy/cli-proxy-api/scripts/update_model_aliases.py --provider all --dry-run
+```
+
+Replace `--dry-run` with `--write` to apply locally. Provider selection is
+`--provider anthropic` (default), `openai`, or `all`; source selection defaults to
+`public`. Use `--config PATH` for another source file. Preview is the default
+when neither write-mode flag is supplied.
+
+Concrete versioned alias keys are renamed, including `openai/claude-...` and
+`anthropic/gpt-...`. The script also updates the matching Claude/GPT model IDs
+already present as values of `model_name_base_model_map`, including fallback and
+vision entries. Each value follows its own model family, even when its route
+uses a different provider's protocol. Map keys, provider prefixes, explicit
+per-model `base_model` overrides, routing targets, wildcard/image aliases, and
+JSON formatting are preserved. Old concrete alias names are replaced, not
+retained as additional aliases. `base_model` is LiteLLM metadata for pricing and
+model capabilities; updating it does not change which model the backend serves.
+Duplicate JSON keys and destination collisions abort. Discovery for all selected
+providers completes before one atomic write; file changes detected during
+discovery abort it. Writes use the repository's symlink-safe writer and produce
+mode `0600`; already-current files are not rewritten. Local layers are not
+merged or modified automatically; review any local alias overrides separately.
+
+For optional account-specific discovery, select `--source api` explicitly and
+pass only the selected provider's `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` through
+the Docker environment (`-e VARIABLE_NAME`, never a literal key in argv).
+Anthropic uses `/v1/models`, active `line` entries in newest-first order, and
+pagination. OpenAI uses `/v1/models` and the highest numeric canonical
+`gpt-VERSION-astra`, `-sol`, `-terra`, or `-luna` version per required family;
+`created` is not a release-order signal. This API-mode naming policy excludes
+snapshots, previews, image models, fine-tunes, and models whose shutdown date
+has arrived in UTC. The helper does not read `.env`, CLI login files, or private
+configs for credentials; public mode neither reads nor forwards API keys.
+
+This helper does **not** generate resolved configuration, sync LiteLLM, deploy,
+or change Portainer. Review the diff before the normal generate/sync flow.
+
 ## Sync
 
 ```bash
