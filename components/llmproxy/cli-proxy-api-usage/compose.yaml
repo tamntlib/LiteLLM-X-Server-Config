@@ -20,6 +20,9 @@ services:
       - internal
     deploy:
       replicas: 1
+      labels:
+        bakabel.type: sqlite
+        bakabel.paths: /data/app.db
       update_config:
         parallelism: 1
         delay: 10s

@@ -1,0 +1,38 @@
+# Independent Swarm backup stack powered by Bakabel v0.3.1 (100% env-var configured).
+services:
+  bakabel:
+    image: ghcr.io/tamntlib/bakabel@sha256:c80fe490b5ad3f0b857ce442d92d41589e172258f1696a90d97c98095da07323
+    environment:
+      BAKABEL_REPOSITORY: ${BAKABEL_REPOSITORY:-/repository}
+      BAKABEL_SCHEDULE: ${BAKABEL_SCHEDULE:-0 2 * * *}
+      BAKABEL_TZ: ${BAKABEL_TZ:-Asia/Ho_Chi_Minh}
+      BAKABEL_SCOPE: ${BAKABEL_SCOPE:-}
+      BAKABEL_AUTO_INIT: ${BAKABEL_AUTO_INIT:-true}
+      BAKABEL_RETENTION: ${BAKABEL_RETENTION:-}
+      BAKABEL_WEBHOOK_URL: ${BAKABEL_WEBHOOK_URL:-}
+      RESTIC_PASSWORD: ${BAKABEL_RESTIC_PASSWORD:?set BAKABEL_RESTIC_PASSWORD in .env}
+      AWS_ACCESS_KEY_ID: ${BAKABEL_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BAKABEL_AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${BAKABEL_AWS_DEFAULT_REGION:-}
+    volumes:
+      - bakabel-state:/var/lib/bakabel
+      - bakabel-repo:/repository
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+volumes:
+  bakabel-state:
+  bakabel-repo:

@@ -50,6 +50,11 @@ A component directory appearing on disk does not add it to any preset. This prev
 
 The `portainer` preset selects only `portainer/portainer` (Agent + Portainer). The independent `traefik` preset selects only `traefik/traefik` (ingress). Neither is inherited by `all` or the LiteLLM preset hierarchy. Application presets' `traefik` feature enables routing overlays, not deployment of the ingress stack. Every ingress consumer, including Traefik and Portainer, requires the independent external `public` overlay to be created by Docker CLI first. Traefik also requires its certificate volume/node prerequisite. No preset creates `public` and no network-owner ordering dependency exists between the management and ingress components. Stack updates reuse the existing external network; presets do not recreate or change ownership of shared infrastructure.
 
+The independent `backup` preset selects only `backup/bakabel`, with no application
+dependencies or features. It is never inherited by `all` or `default`. See the
+[component guide](../components/backup/bakabel/README.md) for `.env` configuration,
+service opt-in labels, and restore commands.
+
 ## Current hierarchy
 
 ```text
@@ -60,6 +65,7 @@ litellm-only
 │           └── default
 └── litellm-standalone
 
+backup
 portainer
 traefik
 ```

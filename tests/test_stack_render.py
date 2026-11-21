@@ -299,8 +299,8 @@ class StackRenderTest(unittest.TestCase):
     def test_all_rendered_runtime_contract_snapshot(self):
         expected = {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
-            "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
-            "llmproxy": "f389436b3f229e33d0a553d0c35149117dad4526d55269fdf1e3bad004eb1651",
+            "llmproxy-data": "f386e19468366bd08f964c164f330a18c731813fe5155dc9abedd732a553f75b",
+            "llmproxy": "12a3ce747b92aa6a6c5c281b17ccbca4c9a2016f84d8c4245de075a64de541f6",
         }
         rendered = self.render("all")
         actual = {

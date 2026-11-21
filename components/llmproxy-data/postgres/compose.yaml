@@ -24,6 +24,8 @@ services:
       retries: 3
     deploy:
       replicas: 1
+      labels:
+        bakabel.type: postgres
       update_config:
         parallelism: 1
         delay: 10s

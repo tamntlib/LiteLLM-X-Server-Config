@@ -60,6 +60,7 @@ See:
 - [Components](docs/components.md)
 - [Component commands](docs/component-commands.md)
 - [Presets](docs/presets.md)
+- [Optional automated backups (Bakabel)](components/backup/bakabel/README.md)
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
 - [Adding a component](docs/adding-a-component.md)
@@ -143,10 +144,11 @@ Solid arrows show the main request paths; dotted arrows show persistent storage.
 | `llmproxy` | PostgreSQL, LiteLLM, CLIProxyAPI, usage UI, Headroom + Traefik |
 | `all` | Current full topology: `llmproxy` + Netdata + monitoring overlays |
 | `default` | `all` minus the Headroom component and its LiteLLM guardrail |
+| `backup` | Independent opt-in Bakabel v0.3.1 scheduler (env-var configured, pinned image) |
 | `portainer` | Portainer + Portainer Agent, no ingress service |
 | `traefik` | Shared ingress using the independent external `public` overlay and existing ACME volume |
 
-`portainer` and `traefik` are independent presets, not inherited by `all` or the LiteLLM presets. Select each explicitly. The `traefik` feature on application presets only adds routing labels; it does not deploy the ingress service.
+`backup`, `portainer`, and `traefik` are independent presets, not inherited by `all` or the LiteLLM presets. Select each explicitly. The `traefik` feature on application presets only adds routing labels; it does not deploy the ingress service.
 
 Preset inheritance can subtract an inherited component with `exclude_components`. The
 exclusion removes all resources owned by that component: Compose services, overlays,
@@ -279,7 +281,7 @@ Keep them mode `0600`. Public examples and schemas remain tracked.
 
 `compose.local.example.yaml` is an explicit public exception: Git and packages retain it, but rendering never loads it automatically. Copy it to `compose.local.yaml` in the same component directory to activate a private override. Other `*.local*` files and private directories remain excluded.
 
-The same root `.env` owns `PORTAINER_HOST` for the `portainer` preset, and `CF_DNS_API_TOKEN`, `LETSENCRYPT_EMAIL`, and `TRAEFIK_NODE_ID` for the `traefik` preset. Set `TRAEFIK_NODE_ID` to the node holding the existing `portainer_traefik-letsencrypt-data` volume. Traefik reuses that volume. All stacks, including Portainer and Traefik, consume `public` as an external overlay. Create the network separately with Docker CLI before deploying any consumer; no stack owns or creates it. See [Deployment](docs/deployment.md) for bootstrap prerequisites and stack updates; existing shared networks are reused, not recreated. Before deployment, the operator must verify that the selected node already holds the intended ACME data: Swarm can create an empty local volume if it is missing there, even with an external declaration. See [Deployment](docs/deployment.md) for bootstrap and the `/opt/portainer` / `/opt/traefix` operator layout.
+The same root `.env` owns `PORTAINER_HOST` for the `portainer` preset, and `CF_DNS_API_TOKEN`, `LETSENCRYPT_EMAIL`, and `TRAEFIK_NODE_ID` for the `traefik` preset. Set `TRAEFIK_NODE_ID` to the node holding the existing `portainer_traefik-letsencrypt-data` volume. Traefik reuses that volume. Ingress consumers, including Portainer and Traefik, consume `public` as an external overlay; the independent backup stack does not. Create the network separately with Docker CLI before deploying any consumer; no stack owns or creates it. See [Deployment](docs/deployment.md) for bootstrap prerequisites and stack updates; existing shared networks are reused, not recreated. Before deployment, the operator must verify that the selected node already holds the intended ACME data: Swarm can create an empty local volume if it is missing there, even with an external declaration. See [Deployment](docs/deployment.md) for bootstrap and the `/opt/portainer` / `/opt/traefix` operator layout.
 
 ## Installed wheel
 

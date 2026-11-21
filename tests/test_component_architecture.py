@@ -298,11 +298,11 @@ class StackOwnershipTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         self.assertFalse((root / "stacks").exists())
         stacks = {component.stack for component in discover_components(root).values()}
-        self.assertEqual(stacks, {"llmproxy", "llmproxy-data", "monitoring", "portainer", "traefik"})
+        self.assertEqual(stacks, {"backup", "llmproxy", "llmproxy-data", "monitoring", "portainer", "traefik"})
         for stack in stacks:
             with self.subTest(stack=stack):
                 self.assertFalse((root / "components" / stack / "compose.yaml").exists())
-                self.assertTrue((root / "components" / stack / "stack.toml").is_file())
+                self.assertEqual((root / "components" / stack / "stack.toml").is_file(), stack != "backup")
 
     def test_stack_bases_and_order_are_owned_beside_service_directories(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -31,8 +31,8 @@ EXISTING_PRESETS = {
         "stacks": ("monitoring", "llmproxy-data", "llmproxy"),
         "hashes": {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
-            "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
-            "llmproxy": "f389436b3f229e33d0a553d0c35149117dad4526d55269fdf1e3bad004eb1651",
+            "llmproxy-data": "f386e19468366bd08f964c164f330a18c731813fe5155dc9abedd732a553f75b",
+            "llmproxy": "12a3ce747b92aa6a6c5c281b17ccbca4c9a2016f84d8c4245de075a64de541f6",
         },
     },
     "litellm-only": {
@@ -40,7 +40,7 @@ EXISTING_PRESETS = {
         "features": (),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy-data": "48344bf44f0bbb10cb94d4d3cc771e3999261846c131bac2c3bcf9d9b0d0d6de",
             "llmproxy": "dc055700ef47023e0d8166a2a2ae386ac7706559052a16ca7abd96c797f151d2",
         },
     },
@@ -49,7 +49,7 @@ EXISTING_PRESETS = {
         "features": ("publish",),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy-data": "48344bf44f0bbb10cb94d4d3cc771e3999261846c131bac2c3bcf9d9b0d0d6de",
             "llmproxy": "ec98a6bae27016988d1d5f17c162c2e940781770070a338d07e347675d08f1dc",
         },
     },
@@ -58,7 +58,7 @@ EXISTING_PRESETS = {
         "features": ("traefik",),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
+            "llmproxy-data": "48344bf44f0bbb10cb94d4d3cc771e3999261846c131bac2c3bcf9d9b0d0d6de",
             "llmproxy": "1c6d8d8af9f3a17a3a91470bcad6f5388872c14fc3fc535a62d4e366379cb5aa",
         },
     },
@@ -73,8 +73,8 @@ EXISTING_PRESETS = {
         "features": ("traefik",),
         "stacks": ("llmproxy-data", "llmproxy"),
         "hashes": {
-            "llmproxy-data": "a5e884c6ba0b32835dd708be4712a5343bfaa85f087e64bac3f336e7cd48b1c4",
-            "llmproxy": "706ade07fc7b3ba59f51d330ad45bd8c9614b9728af90699a15047400ba31687",
+            "llmproxy-data": "48344bf44f0bbb10cb94d4d3cc771e3999261846c131bac2c3bcf9d9b0d0d6de",
+            "llmproxy": "0f2814caf3876b025987aa4bbd383bc7a2230b9cd835bf5df2944376acc6c15d",
         },
     },
 }
@@ -83,6 +83,14 @@ EXISTING_PRESETS = {
 # without the empty stack base (runtime parity is covered in test_stack_render).
 ALL_PUBLIC_PRESETS = {
     **EXISTING_PRESETS,
+    "backup": {
+        "components": ("backup/bakabel",),
+        "features": (),
+        "stacks": ("backup",),
+        "hashes": {
+            "backup": "baad07b884ab9be1b63d3d248108fa55478c27bfcac217de5fb74b7a299b034f",
+        },
+    },
     "default": {
         "components": (
             "llmproxy-data/postgres",
@@ -95,8 +103,8 @@ ALL_PUBLIC_PRESETS = {
         "stacks": ("monitoring", "llmproxy-data", "llmproxy"),
         "hashes": {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
-            "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
-            "llmproxy": "da3db52cbd239073cf429d7cf6e5324b0227b8cbb2497cc4aae38d273ff00e4b",
+            "llmproxy-data": "f386e19468366bd08f964c164f330a18c731813fe5155dc9abedd732a553f75b",
+            "llmproxy": "522e448212bef55ec8ea1eb1c3f7604fb46c421a4fe2d1e9cee3f307dcfe4a80",
         },
     },
     "portainer": {
@@ -352,7 +360,7 @@ class PortainerDeploymentTest(unittest.TestCase):
                 self.assertEqual(path.name, "compose.local.example.yaml")
         self.assertFalse(any(part.startswith(".env") for path in packaged for part in Path(path).parts))
 
-    def test_packaged_resource_fallback_discovers_eight_presets_and_eight_components(self):
+    def test_packaged_resource_fallback_discovers_nine_presets_and_nine_components(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             directory = Path(tmpdir)
             packaged_root = directory / "site-packages" / "llmproxy" / "resources"
@@ -374,8 +382,8 @@ class PortainerDeploymentTest(unittest.TestCase):
                 selected_root = resources.resource_root()
 
             self.assertEqual(selected_root, packaged_root)
-            self.assertEqual(len(discover_components(selected_root)), 8)
-            self.assertEqual(len(list_presets(selected_root)), 8)
+            self.assertEqual(len(discover_components(selected_root)), 9)
+            self.assertEqual(len(list_presets(selected_root)), 9)
             self.assertEqual(resolve_preset("traefik", selected_root).components, ("traefik/traefik",))
             self.assertEqual(
                 resolve_preset("portainer", selected_root).components,
