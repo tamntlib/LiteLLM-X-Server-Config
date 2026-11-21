@@ -300,7 +300,7 @@ class StackRenderTest(unittest.TestCase):
         expected = {
             "monitoring": "0a201cbee81da15d4e0c4b30bc5574a7dcf8298011bfaed0a64c500bef5e9183",
             "llmproxy-data": "e79ce7756e162452a73d6cb57b2e69f55ad1f4a717020527dae500d86dfb4388",
-            "llmproxy": "c16ea8de9ebb0eeac74cb8ca4627aea528194d13eaa2b6606dd8a7d7029b097e",
+            "llmproxy": "f389436b3f229e33d0a553d0c35149117dad4526d55269fdf1e3bad004eb1651",
         }
         rendered = self.render("all")
         actual = {
