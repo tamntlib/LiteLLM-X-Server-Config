@@ -22,7 +22,7 @@
             "o-2": {}, "o-2-vision": {},
             "o-3": {}, "o-3-vision": {},
             "codex-auto-review": {},
-            "gpt-image-2.5-flare": {}, "gpt-image-2.5-sunburst": {}
+            "gpt-image-2.6-flare": {}, "gpt-image-2.6-sunburst": {}
           }
         }
       }
@@ -62,9 +62,9 @@
     "anthropic/gpt-6.2-sol": "a-1",
     "anthropic/gpt-6.1-terra": "a-2",
     "anthropic/gpt-6-luna": "a-3",
-    "gpt-image-*": "gpt-image-2.5-flare",
-    "gpt-image-2.5-flare": "gpt-image-2.5-flare",
-    "gpt-image-2.5-sunburst": "gpt-image-2.5-sunburst",
+    "gpt-image-*": "gpt-image-2.6-flare",
+    "gpt-image-2.6-flare": "gpt-image-2.6-flare",
+    "gpt-image-2.6-sunburst": "gpt-image-2.6-sunburst",
     "codex-auto-review": "codex-auto-review"
   },
   "fallbacks": [
