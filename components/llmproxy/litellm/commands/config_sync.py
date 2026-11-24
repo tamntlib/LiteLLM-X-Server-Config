@@ -16,7 +16,7 @@ def configure(parser):
     source.add_argument("--config", type=Path)
     parser.add_argument(
         "--only",
-        default="credentials,models,aliases,fallbacks,public_model_hub,router_settings,guardrails",
+        default="credentials,models,aliases,fallbacks,public_model_hub,router_settings,general_settings,guardrails,access_groups",
     )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--prune", action="store_true")

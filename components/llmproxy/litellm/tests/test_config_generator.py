@@ -797,7 +797,8 @@ class ProviderDiscoverySafetyTest(unittest.TestCase):
 
         self.assertIsNone(generated["credentials"])
         self.assertIsNone(generated["models"])
-        self.assertEqual(generated["guardrails"], [])
+        self.assertIsNone(generated["guardrails"])
+        self.assertIsNone(generated["access_groups"])
 
     def test_llmproxy_preserves_cli_proxy_models_and_headroom_guardrail(self):
         with patch(f"{generator.__name__}.validate_prices"):

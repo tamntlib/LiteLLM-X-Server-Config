@@ -5,5 +5,8 @@
     "cooldown_time": 0,
     "num_retries": 1,
     "timeout": 600
+  },
+  "general_settings": {
+    "enforce_fallback_model_access": false
   }
 }

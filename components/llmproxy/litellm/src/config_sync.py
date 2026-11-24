@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Unified LiteLLM management script for credentials, models, aliases, fallbacks,
-public model hub, router settings, and guardrails.
+public model hub, router settings, general settings, guardrails, and access groups.
 
 Configuration:
     - config.json: Base configuration (providers, models, aliases, fallbacks,
-      public_model_hub, router_settings, guardrails)
+      public_model_hub, router_settings, general_settings, guardrails, access_groups)
     - config.local.json: Local overrides (extends/overrides config.json)
       Include api_key in provider config for credentials:
       {
@@ -30,18 +30,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from llmproxy.core.http import DEFAULT_HTTP_TIMEOUT, build_request, format_http_error, request_json
+from llmproxy.core.http import (
+    DEFAULT_HTTP_TIMEOUT,
+    build_request,
+    format_http_error,
+    read_http_error_body,
+    request_json,
+)
 from llmproxy.core.env import load_dotenv
 from llmproxy.core.command import CommandError
 from .config_generate import (
+    ACCESS_GROUP_ALLOWED_FIELDS,
     ModelDiscoveryError,
     alias_target_model,
     generate_config,
     generate_config_for_preset,
     is_valid_alias_target,
     router_fallback_references,
+    validate_access_group_entry,
+    validate_access_groups,
     validate_aliases,
     validate_fallbacks,
+    validate_general_settings_shape,
     validate_public_model_hub,
 )
 
@@ -733,6 +743,201 @@ def update_router_settings(updates: dict, *, current: dict | None = None):
 
 
 # ============================================================================
+# General Settings Management
+# ============================================================================
+
+
+def _exact_json_equal(actual: Any, desired: Any) -> bool:
+    """Compare JSON values strictly without treating bool as int."""
+    if isinstance(actual, bool) or isinstance(desired, bool):
+        return type(actual) is type(desired) and actual == desired
+    if isinstance(actual, dict) and isinstance(desired, dict):
+        return actual.keys() == desired.keys() and all(
+            _exact_json_equal(actual[key], desired[key]) for key in desired
+        )
+    if isinstance(actual, list) and isinstance(desired, list):
+        return len(actual) == len(desired) and all(
+            _exact_json_equal(left, right) for left, right in zip(actual, desired)
+        )
+    return actual == desired
+
+
+def _expected_general_settings(config: dict) -> dict[str, Any]:
+    raw = config.get("general_settings", {})
+    if raw is None:
+        return {}
+    try:
+        validate_general_settings_shape(raw)
+    except ModelDiscoveryError as exc:
+        raise CommandError(str(exc)) from exc
+    return dict(raw)
+
+
+def _is_unset_general_setting_error(error: urllib.error.HTTPError, field_name: str) -> bool:
+    if error.code != 400:
+        return False
+    body = read_http_error_body(error, limit=512)
+    if not body:
+        return False
+    try:
+        parsed = json.loads(body)
+    except Exception:
+        return False
+    return (
+        isinstance(parsed, dict)
+        and isinstance(parsed.get("detail"), dict)
+        and parsed["detail"].get("error") == f"Field name={field_name} is not set"
+    )
+
+
+def get_general_setting(field_name: str) -> dict[str, Any]:
+    """Read a single LiteLLM general_settings field via /config/field/info."""
+    if not isinstance(field_name, str) or not field_name:
+        raise CommandError("Invalid general_settings field name")
+    query = urllib.parse.urlencode({"field_name": field_name})
+    url = f"{_get_base_url()}/config/field/info?{query}"
+    headers = {"Authorization": "Bearer " + _get_api_key()}
+    try:
+        result = request_json(url, headers=headers)
+    except urllib.error.HTTPError as e:
+        if _is_unset_general_setting_error(e, field_name):
+            return {
+                "set": False,
+                "field_name": field_name,
+                "field_value": None,
+                "source": None,
+                "editable": True,
+            }
+        raise CommandError(
+            f"Failed to read general_settings '{field_name}': {format_http_error(e)}"
+        ) from e
+    except Exception as e:
+        raise CommandError(
+            f"Failed to read general_settings '{field_name}': {e}"
+        ) from e
+
+    if (
+        not isinstance(result, dict)
+        or result.get("field_name") != field_name
+        or "field_value" not in result
+        or (result.get("source") is not None and not isinstance(result.get("source"), str))
+        or (result.get("editable") is not None and not isinstance(result.get("editable"), bool))
+    ):
+        raise CommandError(
+            f"general_settings '{field_name}' info returned an unexpected response"
+        )
+    return {
+        "set": True,
+        "field_name": field_name,
+        "field_value": result["field_value"],
+        "source": result.get("source"),
+        "editable": result.get("editable"),
+    }
+
+
+def update_general_setting(field_name: str, field_value: Any) -> tuple[bool, Any]:
+    """Update a single general_settings field and verify convergence via readback."""
+    success, result = post_request(
+        "config/field/update",
+        {
+            "config_type": "general_settings",
+            "field_name": field_name,
+            "field_value": field_value,
+        },
+    )
+    if not success:
+        return False, result
+    try:
+        readback = get_general_setting(field_name)
+    except CommandError as exc:
+        return False, str(exc)
+    if not readback.get("set") or not _exact_json_equal(
+        readback.get("field_value"), field_value
+    ):
+        return False, f"general_settings '{field_name}' readback did not converge"
+    return True, readback
+
+
+def sync_general_settings(
+    config: dict,
+    force: bool = False,
+    *,
+    initial_values: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    logger.info("=" * 60)
+    logger.info("Syncing general settings...")
+    logger.info("=" * 60)
+
+    try:
+        desired = _expected_general_settings(config)
+    except CommandError as exc:
+        logger.error(str(exc))
+        return False
+    if not desired:
+        logger.info("No general_settings in config, skipping")
+        return True
+
+    current_values: dict[str, dict[str, Any]] = {}
+    for field_name in desired:
+        if initial_values is not None and field_name in initial_values:
+            current_values[field_name] = initial_values[field_name]
+        else:
+            try:
+                current_values[field_name] = get_general_setting(field_name)
+            except CommandError as exc:
+                logger.error(str(exc))
+                return False
+
+    action_plan: list[tuple[str, str, Any]] = []
+    for field_name, desired_value in desired.items():
+        current = current_values[field_name]
+        already_matches = current.get("set") is True and _exact_json_equal(
+            current.get("field_value"), desired_value
+        )
+        if not force and already_matches:
+            action_plan.append(("skip", field_name, desired_value))
+            continue
+        if current.get("set") is True and current.get("editable") is False:
+            logger.error(
+                "general_settings '%s' is owned by config file and cannot be updated via API",
+                field_name,
+            )
+            return False
+        action_plan.append(("update", field_name, desired_value))
+
+    converged: dict[str, Any] = {}
+    for action, field_name, desired_value in action_plan:
+        if action == "skip":
+            logger.info("general_settings '%s' already up-to-date, skipping", field_name)
+            converged[field_name] = desired_value
+            continue
+
+        success, result = update_general_setting(field_name, desired_value)
+        if not success:
+            logger.error("Failed to update general_settings '%s': %s", field_name, result)
+            return False
+        logger.info("Updated general_settings '%s'", field_name)
+        for prev_name, prev_value in converged.items():
+            try:
+                prev_readback = get_general_setting(prev_name)
+            except CommandError as exc:
+                logger.error(str(exc))
+                return False
+            if not prev_readback.get("set") or not _exact_json_equal(
+                prev_readback.get("field_value"), prev_value
+            ):
+                logger.error(
+                    "general_settings '%s' drifted after updating '%s'",
+                    prev_name,
+                    field_name,
+                )
+                return False
+        converged[field_name] = desired_value
+
+    return True
+
+
+# ============================================================================
 # Aliases Management
 # ============================================================================
 
@@ -985,9 +1190,24 @@ def update_guardrail(guardrail_id: str, guardrail: dict):
     return put_request(f"guardrails/{encoded_id}", {"guardrail": guardrail})
 
 
+def delete_guardrail(guardrail_id: str):
+    encoded_id = _encode_endpoint_segment(guardrail_id, "guardrail ID")
+    return delete_request(f"guardrails/{encoded_id}")
+
+
+def _guardrail_id(guardrail: dict) -> str | None:
+    gid = guardrail.get("guardrail_id") or guardrail.get("id")
+    return gid if isinstance(gid, str) and gid else None
+
+
 def _expected_guardrails(config: dict) -> dict[str, dict]:
+    raw = config.get("guardrails")
+    if raw is None:
+        return {}
+    if not isinstance(raw, list):
+        raise CommandError("Guardrail configuration must be a list or null")
     expected: dict[str, dict] = {}
-    for desired in config.get("guardrails") or []:
+    for desired in raw:
         params = desired.get("litellm_params") if isinstance(desired, dict) else None
         mode = params.get("mode") if isinstance(params, dict) else None
         valid_mode = (
@@ -1016,20 +1236,24 @@ def _expected_guardrails(config: dict) -> dict[str, dict]:
     return expected
 
 
-def sync_guardrails(config: dict, *, initial_inventory=None):
+def sync_guardrails(config: dict, force: bool = False, *, initial_inventory=None):
     logger.info("=" * 60)
     logger.info("Syncing guardrails...")
     logger.info("=" * 60)
 
-    desired_guardrails = config.get("guardrails", [])
-    if not desired_guardrails:
-        logger.info("No guardrails in config, skipping")
+    desired_guardrails = config.get("guardrails")
+    if desired_guardrails is None:
+        logger.info("No guardrails section in config, skipping")
         return True
     try:
         _expected_guardrails(config)
     except CommandError as exc:
         logger.error(str(exc))
         return False
+
+    if not desired_guardrails:
+        logger.info("Explicit empty guardrails in config, nothing to create or update")
+        return True
 
     if initial_inventory is None:
         success, existing_guardrails = get_all_guardrails()
@@ -1064,11 +1288,11 @@ def sync_guardrails(config: dict, *, initial_inventory=None):
         existing = existing_by_name.get(name)
         if existing is None:
             action_plan.append(("create", desired, None))
-        elif _config_contains(existing, desired):
+        elif not force and _config_contains(existing, desired):
             action_plan.append(("skip", desired, None))
         else:
-            guardrail_id = existing.get("guardrail_id") or existing.get("id")
-            if not isinstance(guardrail_id, str) or not guardrail_id:
+            guardrail_id = _guardrail_id(existing)
+            if guardrail_id is None:
                 logger.error(f"Cannot update guardrail {name}: missing guardrail_id")
                 return False
             action_plan.append(("update", desired, guardrail_id))
@@ -1128,6 +1352,523 @@ def sync_guardrails(config: dict, *, initial_inventory=None):
             return False
         projected_by_name = readback_by_name
         existing_by_name = readback_by_name
+
+    return True
+
+
+def _index_guardrails_by_name(guardrails: object) -> dict[str, dict] | None:
+    if not isinstance(guardrails, list):
+        return None
+    indexed: dict[str, dict] = {}
+    for item in guardrails:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("guardrail_name"), str)
+            or not item["guardrail_name"]
+            or item["guardrail_name"] in indexed
+        ):
+            return None
+        indexed[item["guardrail_name"]] = item
+    return indexed
+
+
+def _check_stale_guardrails_deletable(
+    stale_guardrails: list[dict],
+    all_guardrails: list[dict],
+) -> str | None:
+    seen_ids: set[str] = set()
+    for item in all_guardrails:
+        gid = _guardrail_id(item)
+        if gid is not None:
+            if gid in seen_ids:
+                return f"Guardrail inventory contains duplicate ID: {gid}"
+            seen_ids.add(gid)
+    for guardrail in stale_guardrails:
+        if _guardrail_id(guardrail) is None:
+            return (
+                f"Guardrail '{guardrail['guardrail_name']}' is missing guardrail_id; "
+                "refusing prune"
+            )
+    return None
+
+
+def _plan_guardrail_prune(
+    config: dict,
+    *,
+    inventory: list[dict] | None = None,
+):
+    if config.get("guardrails") is None:
+        return ([], {}, [])
+    expected = _expected_guardrails(config)
+    if inventory is None:
+        success, current = get_all_guardrails()
+        if not success or not isinstance(current, list):
+            logger.error(f"Failed to read guardrails for prune: {current}")
+            return None
+        inventory = current
+    indexed = _index_guardrails_by_name(inventory)
+    if indexed is None:
+        logger.error("Guardrail inventory contains an invalid or duplicate entry")
+        return None
+    for name, desired in expected.items():
+        live = indexed.get(name)
+        if live is None or not _config_contains(live, desired):
+            logger.error(
+                "Refusing guardrail prune: desired guardrail '%s' did not converge",
+                name,
+            )
+            return None
+    deletion_candidates = [
+        guardrail
+        for guardrail in inventory
+        if guardrail["guardrail_name"] not in expected
+    ]
+    unsafe_reason = _check_stale_guardrails_deletable(deletion_candidates, inventory)
+    if unsafe_reason is not None:
+        logger.error("Refusing guardrail prune: %s", unsafe_reason)
+        return None
+    return deletion_candidates, expected, inventory
+
+
+def prune_guardrails(config: dict, plan=None) -> bool:
+    if config.get("guardrails") is None:
+        return True
+    plan = _plan_guardrail_prune(config) if plan is None else plan
+    if plan is None:
+        return False
+    deletion_candidates, expected, current_inventory = plan
+    projected_by_name = _index_guardrails_by_name(current_inventory)
+    if projected_by_name is None:
+        logger.error("Guardrail prune plan contains an invalid inventory")
+        return False
+
+    for guardrail in deletion_candidates:
+        name = guardrail["guardrail_name"]
+        guardrail_id = _guardrail_id(guardrail)
+        if guardrail_id is None:
+            logger.error("Cannot prune guardrail %s: missing guardrail_id", name)
+            return False
+        logger.info("Pruning guardrail: %s (%s)", name, guardrail_id)
+        success, result = delete_guardrail(guardrail_id)
+        if not success:
+            logger.error("Failed to prune guardrail %s: %s", name, result)
+            return False
+        success, readback = get_all_guardrails()
+        if not success or not isinstance(readback, list):
+            logger.error("Failed to read back guardrails after prune: %s", readback)
+            return False
+        readback_by_name = _index_guardrails_by_name(readback)
+        if readback_by_name is None:
+            logger.error("Guardrail prune readback contains an invalid or duplicate entry")
+            return False
+        projected_by_name.pop(name, None)
+        if name in readback_by_name or any(
+            _guardrail_id(item) == guardrail_id for item in readback
+        ):
+            logger.error("Guardrail prune readback did not remove %s", name)
+            return False
+        if readback_by_name != projected_by_name:
+            logger.error("Guardrail prune changed surviving guardrail state")
+            return False
+        for desired_name, desired in expected.items():
+            actual = readback_by_name.get(desired_name)
+            if actual is None or not _config_contains(actual, desired):
+                logger.error(
+                    "Guardrail prune changed retained desired guardrail: %s",
+                    desired_name,
+                )
+                return False
+
+    return True
+
+
+# ============================================================================
+# Unified Access Group Management
+# ============================================================================
+
+
+_ACCESS_GROUP_LIVE_LIST_FIELDS = (
+    "access_model_names",
+    "access_mcp_server_ids",
+    "access_agent_ids",
+    "access_skill_names",
+    "assigned_key_ids",
+    "assigned_team_ids",
+)
+
+
+def _validate_live_access_group(item: object) -> str | None:
+    if (
+        not isinstance(item, dict)
+        or not isinstance(item.get("access_group_id"), str)
+        or not item["access_group_id"]
+        or not isinstance(item.get("access_group_name"), str)
+        or not item["access_group_name"]
+    ):
+        return "Access group inventory contains an invalid entry"
+    if (
+        "description" in item
+        and item["description"] is not None
+        and not isinstance(item["description"], str)
+    ):
+        return "Access group inventory contains an invalid description"
+    for list_field in _ACCESS_GROUP_LIVE_LIST_FIELDS:
+        if list_field not in item or item[list_field] is None:
+            continue
+        values = item[list_field]
+        if not isinstance(values, list) or any(
+            not isinstance(val, str) for val in values
+        ):
+            return f"Access group inventory contains an invalid {list_field}"
+    if (
+        "mcp_tool_permissions" in item
+        and item["mcp_tool_permissions"] is not None
+        and not isinstance(item["mcp_tool_permissions"], dict)
+    ):
+        return "Access group inventory contains an invalid mcp_tool_permissions"
+    return None
+
+
+def get_all_access_groups():
+    """Return a trustworthy Unified Access Group inventory from LiteLLM."""
+    success, result = get_request("v1/access_group")
+    if not success:
+        return False, result
+    if not isinstance(result, list):
+        return False, "Unexpected response from /v1/access_group"
+
+    seen_names: set[str] = set()
+    seen_ids: set[str] = set()
+    for group in result:
+        error = _validate_live_access_group(group)
+        if error is not None:
+            return False, error
+        name = group["access_group_name"]
+        group_id = group["access_group_id"]
+        if name in seen_names:
+            return False, f"Access group inventory contains duplicate name: {name}"
+        if group_id in seen_ids:
+            return False, f"Access group inventory contains duplicate ID: {group_id}"
+        seen_names.add(name)
+        seen_ids.add(group_id)
+    return True, result
+
+
+def _access_group_payload(desired: dict) -> dict:
+    payload = {"access_group_name": desired["access_group_name"]}
+    for field in (
+        "description",
+        "access_model_names",
+        "access_mcp_server_ids",
+        "mcp_tool_permissions",
+        "access_agent_ids",
+        "access_skill_names",
+    ):
+        if field in desired:
+            payload[field] = desired[field]
+    return payload
+
+
+def _access_group_matches(actual: dict, desired: dict) -> bool:
+    for key, value in _access_group_payload(desired).items():
+        if key == "description" and value is None:
+            if actual.get("description") is not None:
+                return False
+            continue
+        if key not in actual or not _exact_json_equal(actual[key], value):
+            return False
+    return True
+
+
+def _expected_access_groups(config: dict) -> dict[str, dict]:
+    raw = config.get("access_groups")
+    if raw is None:
+        return {}
+    if not isinstance(raw, list):
+        raise CommandError("Access group configuration must be a list or null")
+    expected: dict[str, dict] = {}
+    for desired in raw:
+        if (
+            not isinstance(desired, dict)
+            or not isinstance(desired.get("access_group_name"), str)
+            or not desired["access_group_name"]
+        ):
+            raise CommandError("Access group configuration contains an invalid entry")
+        name = desired["access_group_name"]
+        try:
+            validate_access_group_entry(
+                name,
+                desired,
+                allow_name_field=True,
+                allow_alias_refs=False,
+            )
+        except ModelDiscoveryError as exc:
+            raise CommandError(str(exc)) from exc
+        if name in expected:
+            raise CommandError(
+                f"Access group configuration contains duplicate access group name: {name}"
+            )
+        expected[name] = desired
+    return expected
+
+
+def create_access_group(group: dict):
+    return post_request("v1/access_group", _access_group_payload(group))
+
+
+def update_access_group(access_group_id: str, group: dict):
+    encoded_id = _encode_endpoint_segment(access_group_id, "access group ID")
+    return put_request(f"v1/access_group/{encoded_id}", _access_group_payload(group))
+
+
+def delete_access_group(access_group_id: str):
+    encoded_id = _encode_endpoint_segment(access_group_id, "access group ID")
+    return delete_request(f"v1/access_group/{encoded_id}")
+
+
+def _index_access_groups_by_name(groups: object) -> dict[str, dict] | None:
+    if not isinstance(groups, list):
+        return None
+    indexed: dict[str, dict] = {}
+    seen_ids: set[str] = set()
+    for item in groups:
+        if _validate_live_access_group(item) is not None:
+            return None
+        name = item["access_group_name"]
+        group_id = item["access_group_id"]
+        if name in indexed or group_id in seen_ids:
+            return None
+        indexed[name] = item
+        seen_ids.add(group_id)
+    return indexed
+
+
+def _check_stale_access_groups_safe(stale_groups: list[dict]) -> str | None:
+    for group in stale_groups:
+        name = group["access_group_name"]
+        assigned_keys = group.get("assigned_key_ids")
+        assigned_teams = group.get("assigned_team_ids")
+        if not isinstance(assigned_keys, list) or not isinstance(assigned_teams, list):
+            return (
+                f"Access group '{name}' is missing trustworthy assignment lists; "
+                "refusing prune"
+            )
+        if assigned_keys or assigned_teams:
+            return (
+                f"Access group '{name}' still has live assignments "
+                f"(keys={len(assigned_keys)}, teams={len(assigned_teams)}); "
+                "detach keys/teams before pruning"
+            )
+    return None
+
+
+def sync_access_groups(
+    config: dict,
+    force: bool = False,
+    *,
+    initial_inventory=None,
+    existing_models: set[str] | None = None,
+    current_aliases: dict | None = None,
+) -> bool:
+    logger.info("=" * 60)
+    logger.info("Syncing access groups...")
+    logger.info("=" * 60)
+
+    desired_groups = config.get("access_groups")
+    if desired_groups is None:
+        logger.info("No access_groups section in config, skipping")
+        return True
+    try:
+        _expected_access_groups(config)
+    except CommandError as exc:
+        logger.error(str(exc))
+        return False
+
+    if not desired_groups:
+        logger.info("Explicit empty access_groups in config, nothing to create or update")
+        return True
+
+    if any(group.get("access_model_names") for group in desired_groups):
+        if existing_models is None:
+            existing_models = {model["model_name"] for model in get_all_models()}
+        if current_aliases is None:
+            current_aliases = get_current_aliases()
+        if not validate_access_groups(desired_groups, existing_models, current_aliases):
+            logger.error("Access groups contain unresolved model or alias references")
+            return False
+
+    if initial_inventory is None:
+        success, existing_groups = get_all_access_groups()
+        if not success:
+            logger.error(f"Failed to list access groups: {existing_groups}")
+            return False
+    else:
+        existing_groups = initial_inventory
+    existing_by_name = _index_access_groups_by_name(existing_groups)
+    if existing_by_name is None:
+        logger.error("Access group inventory contains an invalid or duplicate entry")
+        return False
+    projected_by_name = dict(existing_by_name)
+
+    action_plan = []
+    for desired in desired_groups:
+        name = desired["access_group_name"]
+        existing = existing_by_name.get(name)
+        if existing is None:
+            action_plan.append(("create", desired, None))
+        elif not force and _access_group_matches(existing, desired):
+            action_plan.append(("skip", desired, None))
+        else:
+            group_id = existing.get("access_group_id")
+            if not isinstance(group_id, str) or not group_id:
+                logger.error(f"Cannot update access group {name}: missing access_group_id")
+                return False
+            action_plan.append(("update", desired, group_id))
+
+    for action, desired, group_id in action_plan:
+        name = desired["access_group_name"]
+        before = projected_by_name.get(name)
+        if action == "create":
+            success, result = create_access_group(desired)
+            if not success:
+                logger.error(f"Failed to create access group {name}: {result}")
+                return False
+            logger.info(f"Created access group: {name}")
+        elif action == "skip":
+            logger.info(f"Access group already up-to-date, skipping: {name}")
+        else:
+            assert group_id is not None
+            success, result = update_access_group(group_id, desired)
+            if not success:
+                logger.error(f"Failed to update access group {name}: {result}")
+                return False
+            logger.info(f"Updated access group: {name}")
+
+        success, readback = get_all_access_groups()
+        if not success or not isinstance(readback, list):
+            logger.error(f"Failed to read back access groups: {readback}")
+            return False
+        readback_by_name = _index_access_groups_by_name(readback)
+        if readback_by_name is None:
+            logger.error("Access group readback contains an invalid or duplicate entry")
+            return False
+        expected_names = set(projected_by_name)
+        if action == "create":
+            expected_names.add(name)
+        if set(readback_by_name) != expected_names:
+            logger.error("Access group readback changed projected inventory")
+            return False
+        if action == "skip" and readback_by_name[name] != projected_by_name[name]:
+            logger.error("Skipped access group changed before readback: %s", name)
+            return False
+        if any(
+            readback_by_name[other_name] != other
+            for other_name, other in projected_by_name.items()
+            if other_name != name
+        ):
+            logger.error("Access group readback changed preserved state")
+            return False
+        actual = readback_by_name.get(name)
+        if actual is None or not _access_group_matches(actual, desired):
+            logger.error("Access group readback did not converge: %s", name)
+            return False
+        if action == "update" and before is not None:
+            if actual.get("assigned_key_ids") != before.get("assigned_key_ids") or actual.get(
+                "assigned_team_ids"
+            ) != before.get("assigned_team_ids"):
+                logger.error(
+                    "Access group update altered live key/team assignments: %s", name
+                )
+                return False
+        projected_by_name = readback_by_name
+        existing_by_name = readback_by_name
+
+    return True
+
+
+def _plan_access_group_prune(
+    config: dict,
+    *,
+    inventory: list[dict] | None = None,
+):
+    if config.get("access_groups") is None:
+        return ([], {}, [])
+    expected = _expected_access_groups(config)
+    if inventory is None:
+        success, current = get_all_access_groups()
+        if not success or not isinstance(current, list):
+            logger.error(f"Failed to read access groups for prune: {current}")
+            return None
+        inventory = current
+    indexed = _index_access_groups_by_name(inventory)
+    if indexed is None:
+        logger.error("Access group inventory contains an invalid or duplicate entry")
+        return None
+    for name, desired in expected.items():
+        live = indexed.get(name)
+        if live is None or not _access_group_matches(live, desired):
+            logger.error(
+                "Refusing access group prune: desired access group '%s' did not converge",
+                name,
+            )
+            return None
+    deletion_candidates = [
+        group
+        for group in inventory
+        if group["access_group_name"] not in expected
+    ]
+    unsafe_reason = _check_stale_access_groups_safe(deletion_candidates)
+    if unsafe_reason is not None:
+        logger.error("Refusing access group prune: %s", unsafe_reason)
+        return None
+    return deletion_candidates, expected, inventory
+
+
+def prune_access_groups(config: dict, plan=None) -> bool:
+    if config.get("access_groups") is None:
+        return True
+    plan = _plan_access_group_prune(config) if plan is None else plan
+    if plan is None:
+        return False
+    deletion_candidates, expected, current_inventory = plan
+    projected_by_name = _index_access_groups_by_name(current_inventory)
+    if projected_by_name is None:
+        logger.error("Access group prune plan contains an invalid inventory")
+        return False
+
+    for group in deletion_candidates:
+        name = group["access_group_name"]
+        group_id = group["access_group_id"]
+        logger.info("Pruning access group: %s (%s)", name, group_id)
+        success, result = delete_access_group(group_id)
+        if not success:
+            logger.error("Failed to prune access group %s: %s", name, result)
+            return False
+        success, readback = get_all_access_groups()
+        if not success or not isinstance(readback, list):
+            logger.error("Failed to read back access groups after prune: %s", readback)
+            return False
+        readback_by_name = _index_access_groups_by_name(readback)
+        if readback_by_name is None:
+            logger.error("Access group prune readback contains an invalid or duplicate entry")
+            return False
+        projected_by_name.pop(name, None)
+        if name in readback_by_name or any(
+            item["access_group_id"] == group_id for item in readback
+        ):
+            logger.error("Access group prune readback did not remove %s", name)
+            return False
+        if readback_by_name != projected_by_name:
+            logger.error("Access group prune changed surviving access group state")
+            return False
+        for desired_name, desired in expected.items():
+            actual = readback_by_name.get(desired_name)
+            if actual is None or not _access_group_matches(actual, desired):
+                logger.error(
+                    "Access group prune changed retained desired group: %s",
+                    desired_name,
+                )
+                return False
 
     return True
 
@@ -1952,6 +2693,7 @@ def _preflight_inventories(
     components: list[str],
     *,
     prune: bool,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Read and validate every selected initial inventory before mutation."""
     selected = set(components)
@@ -1959,7 +2701,9 @@ def _preflight_inventories(
     fallbacks = config.get("fallbacks")
     public_model_hub = config.get("public_model_hub")
     router_updates = config.get("router_settings", {})
-    guardrails = config.get("guardrails", [])
+    general_updates = _expected_general_settings(config) if "general_settings" in selected else {}
+    guardrails = config.get("guardrails")
+    access_groups = config.get("access_groups")
     referenced_credentials = {
         credential_name
         for model in (config.get("models") or [])
@@ -1970,11 +2714,18 @@ def _preflight_inventories(
         ("credentials" in selected and config.get("credentials") is not None)
         or ("models" in selected and bool(referenced_credentials))
     )
+    need_access_groups = "access_groups" in selected and access_groups is not None
+    need_access_group_model_refs = (
+        need_access_groups
+        and bool(access_groups)
+        and any(group.get("access_model_names") for group in access_groups)
+    )
     need_models = (
         ("models" in selected and config.get("models") is not None)
         or ("aliases" in selected and bool(aliases))
         or ("fallbacks" in selected and bool(fallbacks))
         or ("public_model_hub" in selected and bool(public_model_hub))
+        or need_access_group_model_refs
         or (
             prune
             and "credentials" in selected
@@ -1986,6 +2737,7 @@ def _preflight_inventories(
         or ("fallbacks" in selected and fallbacks is not None)
         or ("router_settings" in selected and bool(router_updates))
         or ("public_model_hub" in selected and bool(public_model_hub))
+        or need_access_group_model_refs
         or (
             prune
             and "models" in selected
@@ -2001,7 +2753,8 @@ def _preflight_inventories(
             and config.get("models") is not None
         )
     )
-    need_guardrails = "guardrails" in selected and bool(guardrails)
+    need_general_settings = "general_settings" in selected and bool(general_updates)
+    need_guardrails = "guardrails" in selected and guardrails is not None
 
     # Even a clear can invalidate preserved references; raw routing-only updates
     # must resolve against live models rather than treating omission as empty.
@@ -2011,8 +2764,10 @@ def _preflight_inventories(
         "credentials": None,
         "models": None,
         "router_settings": None,
+        "general_settings": None,
         "public_model_hub": None,
         "guardrails": None,
+        "access_groups": None,
     }
     if need_credentials:
         snapshot["credentials"] = get_credential_inventory()
@@ -2020,6 +2775,23 @@ def _preflight_inventories(
         snapshot["models"] = get_all_models()
     if need_router:
         snapshot["router_settings"] = get_router_settings()
+    if need_general_settings:
+        general_snapshot: dict[str, dict[str, Any]] = {}
+        for field_name, desired_value in general_updates.items():
+            current = get_general_setting(field_name)
+            already_matches = current.get("set") is True and _exact_json_equal(
+                current.get("field_value"), desired_value
+            )
+            if (
+                current.get("set") is True
+                and current.get("editable") is False
+                and (force or not already_matches)
+            ):
+                raise CommandError(
+                    f"general_settings preflight: '{field_name}' is owned by config file and cannot be updated via API"
+                )
+            general_snapshot[field_name] = current
+        snapshot["general_settings"] = general_snapshot
     if need_public_hub:
         snapshot["public_model_hub"] = get_current_public_model_hub()
     if need_guardrails:
@@ -2027,14 +2799,77 @@ def _preflight_inventories(
         if not success:
             raise CommandError(f"Failed to read guardrail inventory: {inventory}")
         snapshot["guardrails"] = inventory
+    if need_access_groups:
+        success, inventory = get_all_access_groups()
+        if not success:
+            raise CommandError(f"Failed to read access group inventory: {inventory}")
+        snapshot["access_groups"] = inventory
     return snapshot
+
+
+def _preflight_guardrails(
+    config: dict,
+    components: list[str],
+    snapshot: dict[str, Any],
+    *,
+    prune: bool,
+) -> None:
+    if not prune or "guardrails" not in components or config.get("guardrails") is None:
+        return
+    expected = _expected_guardrails(config)
+    live_guardrails = snapshot.get("guardrails") or []
+    stale = [
+        guardrail
+        for guardrail in live_guardrails
+        if guardrail["guardrail_name"] not in expected
+    ]
+    unsafe_reason = _check_stale_guardrails_deletable(stale, live_guardrails)
+    if unsafe_reason is not None:
+        raise CommandError(f"guardrails prune preflight: {unsafe_reason}")
+
+
+def _preflight_access_groups(
+    config: dict,
+    components: list[str],
+    snapshot: dict[str, Any],
+    *,
+    prune: bool,
+) -> None:
+    if "access_groups" not in components or config.get("access_groups") is None:
+        return
+    desired_groups = config["access_groups"]
+    expected = _expected_access_groups(config)
+
+    if desired_groups and any(group.get("access_model_names") for group in desired_groups):
+        names = {model["model_name"] for model in snapshot.get("models") or []}
+        if "models" in components and config.get("models") is not None:
+            desired_names = {model["model_name"] for model in config["models"]}
+            names = desired_names if prune else names | desired_names
+        projected_aliases = dict((snapshot.get("router_settings") or {}).get("model_group_alias", {}))
+        if "aliases" in components and config.get("aliases") is not None:
+            projected_aliases = dict(config["aliases"])
+        if not validate_access_groups(desired_groups, names, projected_aliases):
+            raise CommandError(
+                "access_groups preflight: access_model_names contains unresolved model or alias references"
+            )
+
+    if prune:
+        live_groups = snapshot.get("access_groups") or []
+        stale = [
+            group
+            for group in live_groups
+            if group["access_group_name"] not in expected
+        ]
+        unsafe_reason = _check_stale_access_groups_safe(stale)
+        if unsafe_reason is not None:
+            raise CommandError(f"access_groups prune preflight: {unsafe_reason}")
 
 
 async def sync_config(
     *,
     config_path: Path | None = None,
     preset: str | None = None,
-    only: str = "credentials,models,aliases,fallbacks,public_model_hub,router_settings,guardrails",
+    only: str = "credentials,models,aliases,fallbacks,public_model_hub,router_settings,general_settings,guardrails,access_groups",
     force: bool = False,
     prune: bool = False,
     dry_run: bool = False,
@@ -2050,7 +2885,9 @@ async def sync_config(
         "fallbacks",
         "public_model_hub",
         "router_settings",
+        "general_settings",
         "guardrails",
+        "access_groups",
     }
     invalid = set(components) - valid_components
     if invalid:
@@ -2090,8 +2927,12 @@ async def sync_config(
         _expected_credentials(config)
     if "models" in components and config.get("models") is not None:
         _expected_models(config)
-    if "guardrails" in components and config.get("guardrails"):
+    if "general_settings" in components and config.get("general_settings"):
+        _expected_general_settings(config)
+    if "guardrails" in components and config.get("guardrails") is not None:
         _expected_guardrails(config)
+    if "access_groups" in components and config.get("access_groups") is not None:
+        _expected_access_groups(config)
 
     if dry_run:
         logger.info("DRY RUN: Configuration resolved; no API changes will be made")
@@ -2103,8 +2944,11 @@ async def sync_config(
         config,
         components,
         prune=prune or (force and "models" in components and config.get("models") is not None),
+        force=force,
     )
     _preflight_routing_graph(config, components, snapshot, prune=prune)
+    _preflight_guardrails(config, components, snapshot, prune=prune)
+    _preflight_access_groups(config, components, snapshot, prune=prune)
     model_inventory = snapshot["models"]
     if not force and "models" in components:
         config = _preserve_existing_models(config, model_inventory or [])
@@ -2264,18 +3108,43 @@ async def sync_config(
             "One or more LiteLLM synchronization operations failed: router settings"
         )
 
+    if "general_settings" in components and not sync_general_settings(
+        config,
+        force,
+        initial_values=snapshot.get("general_settings"),
+    ):
+        raise CommandError(
+            "One or more LiteLLM synchronization operations failed: general settings"
+        )
+
     if "guardrails" in components and not sync_guardrails(
         config,
-        initial_inventory=snapshot["guardrails"],
+        force,
+        initial_inventory=snapshot.get("guardrails"),
     ):
         raise CommandError(
             "One or more LiteLLM synchronization operations failed: guardrails"
+        )
+
+    if "access_groups" in components and not sync_access_groups(
+        config,
+        force,
+        initial_inventory=snapshot.get("access_groups"),
+        existing_models=(
+            available_model_names if prune else available_model_names | live_model_names
+        ),
+        current_aliases=fallback_router.get("model_group_alias", {}),
+    ):
+        raise CommandError(
+            "One or more LiteLLM synchronization operations failed: access groups"
         )
 
     # Validate the complete destructive plan before the first delete. Forced
     # replacement removals are part of the same model plan as ordinary prune.
     model_prune_plan = None
     credential_prune_plan = None
+    guardrail_prune_plan = None
+    access_group_prune_plan = None
     if prune or pending_replacements:
         remaining_models = None
         if "models" in components:
@@ -2306,6 +3175,18 @@ async def sync_config(
                 raise CommandError(
                     "One or more LiteLLM synchronization operations failed: credential prune preflight"
                 )
+        if prune and "guardrails" in components:
+            guardrail_prune_plan = _plan_guardrail_prune(config)
+            if guardrail_prune_plan is None:
+                raise CommandError(
+                    "One or more LiteLLM synchronization operations failed: guardrail prune preflight"
+                )
+        if prune and "access_groups" in components:
+            access_group_prune_plan = _plan_access_group_prune(config)
+            if access_group_prune_plan is None:
+                raise CommandError(
+                    "One or more LiteLLM synchronization operations failed: access group prune preflight"
+                )
 
     if (prune or pending_replacements) and "models" in components and not prune_models(
         config, plan=model_prune_plan
@@ -2318,6 +3199,18 @@ async def sync_config(
     ):
         raise CommandError(
             "One or more LiteLLM synchronization operations failed: credential prune"
+        )
+    if prune and "guardrails" in components and not prune_guardrails(
+        config, plan=guardrail_prune_plan
+    ):
+        raise CommandError(
+            "One or more LiteLLM synchronization operations failed: guardrail prune"
+        )
+    if prune and "access_groups" in components and not prune_access_groups(
+        config, plan=access_group_prune_plan
+    ):
+        raise CommandError(
+            "One or more LiteLLM synchronization operations failed: access group prune"
         )
 
     logger.info("=" * 60)

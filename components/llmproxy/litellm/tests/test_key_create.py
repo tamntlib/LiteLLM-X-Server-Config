@@ -96,7 +96,7 @@ class KeyCreationAdapterTest(unittest.TestCase):
     def test_run_delegates_explicit_arguments_and_presents_key(self):
         parser = argparse.ArgumentParser()
         command.configure(parser)
-        args = parser.parse_args(["user@example.com", "--models", " General,Other ", "--alias", "alias", "--key", "sk-test", "--team-id", "team"])
+        args = parser.parse_args(["user@example.com", "--models", " General,Other ", "--access-group", "General", "--alias", "alias", "--key", "sk-test", "--team-id", "team"])
         module = Mock()
         module.create_key_for_user.return_value = "sk-created"
         context = SimpleNamespace(root=Path("/synthetic-selected-root"))
@@ -116,7 +116,7 @@ class KeyCreationAdapterTest(unittest.TestCase):
         self.assertEqual(call.args, ("user@example.com",))
         kwargs = dict(call.kwargs)
         report = kwargs.pop("report")
-        self.assertEqual(kwargs, dict(CREDENTIALS, alias="alias", key_value="sk-test", team_id="team", models=[" General", "Other "], rpm_limit=100, max_budget=700, budget_duration="7d"))
+        self.assertEqual(kwargs, dict(CREDENTIALS, alias="alias", key_value="sk-test", team_id="team", models=[" General", "Other "], access_groups=["General"], rpm_limit=100, max_budget=700, budget_duration="7d"))
         stderr = io.StringIO()
         with redirect_stderr(stderr):
             report("progress")
@@ -160,33 +160,90 @@ class KeyCreationContractTest(unittest.TestCase):
         for call in request.call_args_list[1:]:
             self.assertEqual(call.kwargs["headers"], {"Authorization": "Bearer dummy", "Content-Type": "application/json", "Accept": "*/*"})
 
-    def test_existing_user_is_reused_without_creation(self):
+    def test_existing_user_is_reused_without_creation_and_gets_default_access_group(self):
         module = backend()
         reports = []
-        with patch.object(module, "request_json", side_effect=[{"users": [{"user_email": "other@example.com", "user_id": "other"}, {"user_email": "user@example.com", "user_id": "user-1"}]}, {"key": "sk-created"}]) as request:
+        access_groups = [{"access_group_id": "ag-general", "access_group_name": "General"}]
+        with patch.object(
+            module,
+            "request_json",
+            side_effect=[
+                {"users": [{"user_email": "other@example.com", "user_id": "other"}, {"user_email": "user@example.com", "user_id": "user-1"}]},
+                access_groups,
+                {"key": "sk-created"},
+            ],
+        ) as request:
             self.assertEqual(module.create_key_for_user("user@example.com", alias="explicit", report=reports.append, **CREDENTIALS), "sk-created")
-        self.assertEqual(request.call_count, 2)
-        payload = json.loads(request.call_args_list[1].kwargs["data"])
-        self.assertEqual(payload["models"], [])
+        self.assertEqual(request.call_count, 3)
+        payload = json.loads(request.call_args_list[2].kwargs["data"])
+        self.assertEqual(payload["models"], ["no-default-models"])
+        self.assertEqual(payload["access_group_ids"], ["ag-general"])
         self.assertEqual(payload["key_alias"], "explicit")
         self.assertNotIn("key", payload)
         self.assertEqual(reports[1], "User already exists: user-1")
 
     def test_default_user_models_and_missing_creation_id_fail_closed(self):
         module = backend()
-        with patch.object(module, "request_json", side_effect=[{"users": []}, {}]) as request:
+        access_groups = [{"access_group_id": "ag-general", "access_group_name": "General"}]
+        with patch.object(module, "request_json", side_effect=[{"users": []}, access_groups, {}]) as request:
             with self.assertRaisesRegex(CommandError, "LiteLLM user creation returned no user_id"):
                 module.create_key_for_user("user@example.com", **CREDENTIALS)
-        self.assertEqual(request.call_count, 2)
-        self.assertEqual(json.loads(request.call_args.kwargs["data"])["models"], ["General"])
+        self.assertEqual(request.call_count, 3)
+        self.assertEqual(json.loads(request.call_args.kwargs["data"])["models"], ["all-proxy-models"])
 
     def test_missing_created_key_does_not_report_success(self):
         module = backend()
         reports = []
-        with patch.object(module, "request_json", side_effect=[{"users": []}, {"user_id": "user-1"}, {}]):
+        access_groups = [{"access_group_id": "ag-general", "access_group_name": "General"}]
+        with patch.object(module, "request_json", side_effect=[{"users": []}, access_groups, {"user_id": "user-1"}, {}]):
             with self.assertRaisesRegex(CommandError, "LiteLLM API-key creation returned no key"):
                 module.create_key_for_user("user@example.com", report=reports.append, **CREDENTIALS)
         self.assertEqual(reports, ["Processing user: user@example.com", "User created: user-1"])
+
+    def test_missing_access_group_fails_closed_before_creating_user(self):
+        module = backend()
+        with patch.object(
+            module,
+            "request_json",
+            side_effect=[{"users": []}, [{"access_group_id": "ag-other", "access_group_name": "Other"}]],
+        ) as request:
+            with self.assertRaisesRegex(CommandError, "Unified Access Group not found: General"):
+                module.create_key_for_user("user@example.com", **CREDENTIALS)
+        self.assertEqual(request.call_count, 2)
+
+    def test_explicit_access_groups_and_team_key_skip_default_group(self):
+        module = backend()
+        access_groups = [
+            {"access_group_id": "ag-general", "access_group_name": "General"},
+            {"access_group_id": "ag-review", "access_group_name": "Review"},
+        ]
+        with patch.object(
+            module,
+            "request_json",
+            side_effect=[{"users": []}, access_groups, {"user_id": "user-1"}, {"key": "sk-new"}],
+        ) as request:
+            self.assertEqual(
+                module.create_key_for_user("user@example.com", access_groups=["Review", "General"], **CREDENTIALS),
+                "sk-new",
+            )
+        user_payload = json.loads(request.call_args_list[2].kwargs["data"])
+        key_payload = json.loads(request.call_args_list[3].kwargs["data"])
+        self.assertEqual(user_payload["models"], ["all-proxy-models"])
+        self.assertEqual(key_payload["models"], ["no-default-models"])
+        self.assertEqual(key_payload["access_group_ids"], ["ag-review", "ag-general"])
+
+        with patch.object(
+            module,
+            "request_json",
+            side_effect=[{"users": [{"user_email": "user@example.com", "user_id": "user-1"}]}, {"key": "sk-team"}],
+        ) as team_req:
+            self.assertEqual(
+                module.create_key_for_user("user@example.com", team_id="team-1", **CREDENTIALS),
+                "sk-team",
+            )
+        team_payload = json.loads(team_req.call_args_list[1].kwargs["data"])
+        self.assertEqual(team_payload["models"], [])
+        self.assertNotIn("access_group_ids", team_payload)
 
     def test_malformed_lookup_inventory_is_rejected(self):
         module = backend()

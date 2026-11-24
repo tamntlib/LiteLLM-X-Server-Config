@@ -1,5 +1,6 @@
 """Resolve shared and component-owned LiteLLM configuration layers."""
 
+import fnmatch
 import json
 import logging
 import urllib.error
@@ -1153,6 +1154,10 @@ def is_valid_alias_target(target: object) -> bool:
     return "hidden" not in target or isinstance(target["hidden"], bool)
 
 
+def is_hidden_alias(target: object) -> bool:
+    return isinstance(target, dict) and target.get("hidden") is True
+
+
 def hide_wildcard_aliases(aliases: dict | None) -> dict | None:
     """Keep wildcard aliases routable while omitting them from discovery."""
     if aliases is None:
@@ -1170,18 +1175,24 @@ def hide_wildcard_aliases(aliases: dict | None) -> dict | None:
 
 
 def expand_guardrails(
-    guardrails: dict | list,
+    guardrails: dict | list | None,
     *,
     require_complete: bool = False,
-) -> list[dict]:
+) -> list[dict] | None:
     """Convert guardrails keyed by name into LiteLLM's API list format."""
+    if guardrails is None:
+        return None
     if isinstance(guardrails, list):
         return [dict(guardrail) for guardrail in guardrails]
     if not isinstance(guardrails, dict):
         if require_complete:
-            raise ModelDiscoveryError("Top-level 'guardrails' must be an object")
-        logger.warning("⚠️ Top-level 'guardrails' must be an object; ignoring guardrails")
-        return []
+            raise ModelDiscoveryError(
+                "Top-level 'guardrails' must be an object, list, or null"
+            )
+        logger.warning(
+            "⚠️ Top-level 'guardrails' must be an object, list, or null; ignoring guardrails"
+        )
+        return None
 
     expanded = []
     for guardrail_name, guardrail_config in guardrails.items():
@@ -1195,6 +1206,254 @@ def expand_guardrails(
             )
             continue
         expanded.append({**guardrail_config, "guardrail_name": guardrail_name})
+    return expanded
+
+
+_ACCESS_GROUP_ALIASES_REF_PREFIX = "$aliases:"
+ACCESS_GROUP_ALLOWED_FIELDS = frozenset(
+    {
+        "description",
+        "access_model_names",
+        "access_mcp_server_ids",
+        "mcp_tool_permissions",
+        "access_agent_ids",
+        "access_skill_names",
+    }
+)
+KNOWN_BOOLEAN_GENERAL_SETTINGS = frozenset(
+    {
+        "enforce_fallback_model_access",
+        "disable_fallbacks_on_per_model_rate_limits",
+        "store_model_in_db",
+        "return_wildcard_routes",
+        "disable_auto_add_proxy_admin_to_teams",
+        "store_prompts_in_spend_logs",
+        "disable_requester_ip_address_logging",
+        "always_include_stream_usage",
+        "forward_client_headers_to_llm_api",
+        "cancel_on_disconnect",
+        "apply_user_budget_to_team_keys",
+        "agent_access_default_deny",
+        "disable_budget_reservation",
+    }
+)
+
+
+def validate_general_settings_shape(general_settings: object) -> None:
+    if not isinstance(general_settings, dict):
+        raise ModelDiscoveryError("Top-level 'general_settings' must be an object")
+    for field_name, value in general_settings.items():
+        if not isinstance(field_name, str) or not field_name:
+            raise ModelDiscoveryError(
+                "Top-level 'general_settings' contains an invalid field name"
+            )
+        if field_name in KNOWN_BOOLEAN_GENERAL_SETTINGS and not isinstance(value, bool):
+            raise ModelDiscoveryError(
+                f"general_settings {field_name} must be a boolean"
+            )
+
+
+def validate_access_group_entry(
+    name: object,
+    group: object,
+    *,
+    allow_name_field: bool = False,
+    allow_alias_refs: bool = True,
+) -> None:
+    if not isinstance(name, str) or not name:
+        raise ModelDiscoveryError("Top-level 'access_groups' contains an invalid entry")
+    if not isinstance(group, dict):
+        raise ModelDiscoveryError(f"Access group '{name}' must be an object")
+
+    allowed_fields = set(ACCESS_GROUP_ALLOWED_FIELDS)
+    if allow_name_field:
+        allowed_fields.add("access_group_name")
+    unsupported = sorted(set(group) - allowed_fields)
+    if unsupported:
+        raise ModelDiscoveryError(
+            f"Access group '{name}' contains unsupported field(s): "
+            + ", ".join(unsupported)
+        )
+
+    if "description" in group and group["description"] is not None and not isinstance(
+        group["description"], str
+    ):
+        raise ModelDiscoveryError(
+            f"Access group '{name}' description must be a string or null"
+        )
+
+    for list_field in (
+        "access_model_names",
+        "access_mcp_server_ids",
+        "access_agent_ids",
+        "access_skill_names",
+    ):
+        if list_field not in group:
+            continue
+        items = group[list_field]
+        if not isinstance(items, list) or any(
+            not isinstance(item, str) or not item for item in items
+        ):
+            raise ModelDiscoveryError(
+                f"Access group '{name}' {list_field} must be a list of non-empty strings"
+            )
+
+    for entry in group.get("access_model_names", ()):
+        if entry.startswith(_ACCESS_GROUP_ALIASES_REF_PREFIX):
+            if not allow_alias_refs:
+                raise ModelDiscoveryError(
+                    f"Access group '{name}' contains unexpanded alias ref: {entry}"
+                )
+            if len(entry) == len(_ACCESS_GROUP_ALIASES_REF_PREFIX):
+                raise ModelDiscoveryError(
+                    f"Access group '{name}' contains an empty $aliases: pattern"
+                )
+
+    if "mcp_tool_permissions" in group:
+        permissions = group["mcp_tool_permissions"]
+        if not isinstance(permissions, dict) or any(
+            not isinstance(server_id, str)
+            or not server_id
+            or not isinstance(tools, list)
+            or any(not isinstance(tool, str) or not tool for tool in tools)
+            for server_id, tools in permissions.items()
+        ):
+            raise ModelDiscoveryError(
+                f"Access group '{name}' mcp_tool_permissions must map server IDs to non-empty tool name lists"
+            )
+
+
+def _expand_access_group_model_names(
+    group_name: str,
+    model_names: list[str],
+    aliases: dict | None,
+    *,
+    require_complete: bool = False,
+) -> list[str]:
+    visible_aliases = [
+        alias_name
+        for alias_name, target in (aliases or {}).items()
+        if isinstance(alias_name, str) and alias_name and not is_hidden_alias(target)
+    ]
+    expanded: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        if value not in seen:
+            expanded.append(value)
+            seen.add(value)
+
+    for entry in model_names:
+        if not entry.startswith(_ACCESS_GROUP_ALIASES_REF_PREFIX):
+            add(entry)
+            continue
+        pattern = entry[len(_ACCESS_GROUP_ALIASES_REF_PREFIX) :]
+        if not pattern:
+            if require_complete:
+                raise ModelDiscoveryError(
+                    f"Access group '{group_name}' contains an empty $aliases: pattern"
+                )
+            logger.warning(
+                f"⚠️ Access group '{group_name}' contains an empty $aliases: pattern; skipping"
+            )
+            continue
+        matches = [
+            alias_name
+            for alias_name in visible_aliases
+            if fnmatch.fnmatchcase(alias_name, pattern)
+        ]
+        if not matches:
+            if require_complete:
+                raise ModelDiscoveryError(
+                    f"Access group '{group_name}' alias ref '{entry}' matched no visible aliases"
+                )
+            logger.warning(
+                f"⚠️ Access group '{group_name}' alias ref '{entry}' matched no visible aliases"
+            )
+            continue
+        for alias_name in matches:
+            add(alias_name)
+
+    return expanded
+
+
+def expand_access_groups(
+    access_groups: dict | list | None,
+    aliases: dict | None,
+    *,
+    require_complete: bool = False,
+) -> list[dict] | None:
+    """Convert access_groups keyed by name into LiteLLM's API list format and expand $aliases: refs."""
+    if access_groups is None:
+        return None
+    if not isinstance(access_groups, (dict, list)):
+        if require_complete:
+            raise ModelDiscoveryError(
+                "Top-level 'access_groups' must be an object, list, or null"
+            )
+        logger.warning(
+            "⚠️ Top-level 'access_groups' must be an object, list, or null; ignoring access_groups"
+        )
+        return None
+
+    items: list[tuple[str, dict]] = []
+    if isinstance(access_groups, list):
+        for group in access_groups:
+            if (
+                not isinstance(group, dict)
+                or not isinstance(group.get("access_group_name"), str)
+                or not group["access_group_name"]
+            ):
+                if require_complete:
+                    raise ModelDiscoveryError(
+                        "Top-level 'access_groups' list contains an invalid entry"
+                    )
+                logger.warning("⚠️ Invalid access group entry; skipping")
+                continue
+            items.append((group["access_group_name"], group))
+    else:
+        for group_name, group_config in access_groups.items():
+            if not isinstance(group_name, str) or not group_name or not isinstance(group_config, dict):
+                if require_complete:
+                    raise ModelDiscoveryError(
+                        f"Access group '{group_name}' must be an object"
+                    )
+                logger.warning(
+                    f"⚠️ Access group '{group_name}' must be an object; skipping"
+                )
+                continue
+            items.append((group_name, group_config))
+
+    expanded: list[dict] = []
+    for group_name, group_config in items:
+        normalized: dict = {"access_group_name": group_name}
+        for field in (
+            "description",
+            "access_model_names",
+            "access_mcp_server_ids",
+            "mcp_tool_permissions",
+            "access_agent_ids",
+            "access_skill_names",
+        ):
+            if field not in group_config:
+                continue
+            value = group_config[field]
+            if field == "access_model_names" and isinstance(value, list):
+                normalized[field] = _expand_access_group_model_names(
+                    group_name,
+                    value,
+                    aliases,
+                    require_complete=require_complete,
+                )
+            elif field == "mcp_tool_permissions" and isinstance(value, dict):
+                normalized[field] = {
+                    server_id: list(tools) for server_id, tools in value.items()
+                }
+            elif isinstance(value, list):
+                normalized[field] = list(value)
+            else:
+                normalized[field] = value
+        expanded.append(normalized)
     return expanded
 
 
@@ -1244,11 +1503,14 @@ def _validate_complete_config_shape(config: dict, base_config: dict) -> None:
         "model_name_base_model_map",
         "model_aliases",
         "router_settings",
+        "general_settings",
     )
     for section in object_sections:
         value = config.get(section, {})
         if not isinstance(value, dict):
             raise ModelDiscoveryError(f"Top-level '{section}' must be an object")
+
+    validate_general_settings_shape(config.get("general_settings", {}))
 
     for field in (
         "public_model_hub_autofill_disabled",
@@ -1274,9 +1536,9 @@ def _validate_complete_config_shape(config: dict, base_config: dict) -> None:
     ):
         raise ModelDiscoveryError("router_settings num_retries must be an integer")
 
-    guardrails = config.get("guardrails", {})
-    if not isinstance(guardrails, (dict, list)):
-        raise ModelDiscoveryError("Top-level 'guardrails' must be an object or list")
+    guardrails = config.get("guardrails")
+    if guardrails is not None and not isinstance(guardrails, (dict, list)):
+        raise ModelDiscoveryError("Top-level 'guardrails' must be an object, list, or null")
 
     def validate_guardrail(name: object, guardrail: object) -> None:
         if not isinstance(name, str) or not name:
@@ -1306,7 +1568,9 @@ def _validate_complete_config_shape(config: dict, base_config: dict) -> None:
             )
 
     guardrail_names: set[str] = set()
-    if isinstance(guardrails, list):
+    if guardrails is None:
+        pass
+    elif isinstance(guardrails, list):
         for guardrail in guardrails:
             if (
                 not isinstance(guardrail, dict)
@@ -1326,6 +1590,34 @@ def _validate_complete_config_shape(config: dict, base_config: dict) -> None:
     else:
         for name, guardrail in guardrails.items():
             validate_guardrail(name, guardrail)
+
+    access_groups = config.get("access_groups")
+    if access_groups is not None:
+        if not isinstance(access_groups, (dict, list)):
+            raise ModelDiscoveryError(
+                "Top-level 'access_groups' must be an object, list, or null"
+            )
+        access_group_names: set[str] = set()
+        if isinstance(access_groups, list):
+            for group in access_groups:
+                if (
+                    not isinstance(group, dict)
+                    or not isinstance(group.get("access_group_name"), str)
+                    or not group["access_group_name"]
+                ):
+                    raise ModelDiscoveryError(
+                        "Top-level 'access_groups' list contains an invalid entry"
+                    )
+                group_name = group["access_group_name"]
+                if group_name in access_group_names:
+                    raise ModelDiscoveryError(
+                        f"Top-level 'access_groups' contains duplicate access group name: {group_name}"
+                    )
+                access_group_names.add(group_name)
+                validate_access_group_entry(group_name, group, allow_name_field=True)
+        else:
+            for group_name, group in access_groups.items():
+                validate_access_group_entry(group_name, group, allow_name_field=False)
 
     def validate_optional_strings(value: dict, label: str) -> None:
         for field in (
@@ -1592,7 +1884,9 @@ def generate_config(
     - fallbacks: fallback rules
     - public_model_hub: derived model groups plus explicit aliases to expose in the public model hub
     - router_settings: raw router settings to merge into LiteLLM config
+    - general_settings: general_settings fields to update via LiteLLM config field API
     - guardrails: guardrail definitions expanded to LiteLLM's list format
+    - access_groups: Unified Access Group definitions expanded to LiteLLM's list format, or None if omitted
     """
     if isinstance(config_source, dict):
         config = config_source
@@ -1747,7 +2041,13 @@ def generate_config(
             public_model_hub.extend(aliases.keys())
         resolved_public_model_hub = public_model_hub or None
 
-    # Validate aliases, fallbacks, and public model hub entries against known models
+    expanded_access_groups = expand_access_groups(
+        config.get("access_groups"),
+        aliases if isinstance(aliases, dict) else None,
+        require_complete=require_complete,
+    )
+
+    # Validate aliases, fallbacks, public model hub, and access group entries against known models
     model_names = {m["model_name"] for m in models}
     references_valid = all(
         (
@@ -1760,9 +2060,23 @@ def generate_config(
         raise ModelDiscoveryError(
             "Configuration contains unresolved alias, fallback, or public model hub references"
         )
+    access_groups_valid = (
+        validate_access_groups(expanded_access_groups, model_names, aliases or {})
+        if expanded_access_groups and (resolved_models is not None or aliases is not None)
+        else True
+    )
+    if require_complete and not access_groups_valid:
+        raise ModelDiscoveryError(
+            "Configuration contains unresolved access group model references"
+        )
     if require_complete:
         validate_alias_cycles(aliases or {}, model_names)
     validate_prices(models)
+
+    raw_general_settings = config.get("general_settings", {})
+    resolved_general_settings = (
+        dict(raw_general_settings) if isinstance(raw_general_settings, dict) else {}
+    )
 
     return {
         "credentials": resolved_credentials,
@@ -1771,10 +2085,12 @@ def generate_config(
         "fallbacks": resolved_fallbacks,
         "public_model_hub": resolved_public_model_hub,
         "router_settings": config.get("router_settings", {}),
+        "general_settings": resolved_general_settings,
         "guardrails": expand_guardrails(
-            config.get("guardrails", {}),
+            config.get("guardrails"),
             require_complete=require_complete,
         ),
+        "access_groups": expanded_access_groups,
     }
 
 
@@ -1869,6 +2185,34 @@ def validate_public_model_hub(public_model_hub: list, model_names: set, aliases:
                 f"⚠️ Public model hub entry '{entry}' is not a known model or alias"
             )
         i += 1
+    return valid
+
+
+def validate_access_groups(
+    access_groups: list[dict] | None,
+    model_names: set[str],
+    aliases: dict | None,
+) -> bool:
+    """Validate that access group model entries match known models or aliases."""
+    if not access_groups:
+        return True
+    valid_targets = model_names | set((aliases or {}).keys())
+    valid = True
+    for group in access_groups:
+        group_name = group.get("access_group_name", "<unnamed>")
+        for entry in group.get("access_model_names") or []:
+            if "*" in entry:
+                matched = entry in valid_targets or any(
+                    fnmatch.fnmatchcase(target, entry) for target in valid_targets
+                )
+            else:
+                matched = entry in valid_targets
+            if not matched:
+                valid = False
+                logger.warning(
+                    f"⚠️ Access group '{group_name}' model entry '{entry}' "
+                    f"is not a known model or alias"
+                )
     return valid
 
 

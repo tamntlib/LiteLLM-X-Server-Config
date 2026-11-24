@@ -13,6 +13,76 @@ from llmproxy.core.http import format_http_error, request_json
 DEFAULT_KEY_RPM_LIMIT = 100
 DEFAULT_KEY_MAX_BUDGET = 700
 DEFAULT_KEY_BUDGET_DURATION = "7d"
+DEFAULT_USER_MODELS = ("all-proxy-models",)
+DEFAULT_ACCESS_GROUP = "General"
+NO_DEFAULT_MODELS = "no-default-models"
+
+
+def resolve_access_group_ids(
+    access_groups: Sequence[str],
+    *,
+    base_url: str,
+    api_key: str,
+) -> list[str]:
+    """Resolve Unified Access Group names (or exact IDs) via /v1/access_group."""
+    requested = [item.strip() for item in access_groups if item.strip()]
+    if not requested:
+        return []
+    try:
+        data = request_json(
+            f"{base_url}/v1/access_group",
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json",
+            },
+        )
+    except urllib.error.HTTPError as exc:
+        raise CommandError(
+            f"Failed to list access groups: {format_http_error(exc)}"
+        ) from exc
+    except Exception as exc:
+        raise CommandError(f"Failed to list access groups: {exc}") from exc
+
+    if not isinstance(data, list):
+        raise CommandError("Access group lookup returned an unexpected response")
+
+    by_name: dict[str, str] = {}
+    by_id: dict[str, str] = {}
+    for item in data:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("access_group_id"), str)
+            or not item["access_group_id"]
+            or not isinstance(item.get("access_group_name"), str)
+            or not item["access_group_name"]
+        ):
+            raise CommandError("Access group lookup returned an invalid entry")
+        name = item["access_group_name"]
+        group_id = item["access_group_id"]
+        if name in by_name:
+            raise CommandError(f"Access group lookup returned duplicate name: {name}")
+        if group_id in by_id:
+            raise CommandError(f"Access group lookup returned duplicate ID: {group_id}")
+        by_name[name] = group_id
+        by_id[group_id] = group_id
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    missing: list[str] = []
+    for ref in requested:
+        group_id = by_name.get(ref) or by_id.get(ref)
+        if group_id is None:
+            missing.append(ref)
+            continue
+        if group_id not in seen:
+            resolved.append(group_id)
+            seen.add(group_id)
+    if missing:
+        raise CommandError(
+            "Unified Access Group not found: " + ", ".join(missing)
+        )
+    return resolved
 
 
 def get_user_by_email(email, *, base_url: str, api_key: str):
@@ -51,7 +121,7 @@ def create_user(email, models=None, *, base_url: str, api_key: str):
         "user_id": None,
         "user_email": email,
         "user_role": "internal_user_viewer",
-        "models": models or ["General"],
+        "models": list(models) if models else list(DEFAULT_USER_MODELS),
         "auto_create_key": False,
     }
     try:
@@ -83,6 +153,7 @@ def create_api_key(
     budget_duration=DEFAULT_KEY_BUDGET_DURATION,
     team_id=None,
     models=None,
+    access_group_ids=None,
     *,
     base_url: str,
     api_key: str,
@@ -91,13 +162,15 @@ def create_api_key(
         "user_id": user_id,
         "team_id": team_id,
         "key_alias": key_alias,
-        "models": models or [],
+        "models": list(models) if models else [],
         "key_type": "llm_api",
         "rpm_limit": rpm_limit,
         "max_budget": max_budget,
         "budget_duration": budget_duration,
         "metadata": {},
     }
+    if access_group_ids:
+        payload["access_group_ids"] = list(access_group_ids)
     if key_value:
         payload["key"] = key_value
     try:
@@ -132,24 +205,44 @@ def create_key_for_user(
     budget_duration=DEFAULT_KEY_BUDGET_DURATION,
     team_id: str | None = None,
     models: Sequence[str] | None = None,
+    access_groups: Sequence[str] | None = None,
     report: Callable[[str], None] = lambda message: None,
 ) -> str:
     """Look up or create the user, then create and return their API key.
 
     Progress is reported at the original operation boundaries. Credentials,
-    model selections and reporting are supplied by the caller, not the process.
+    model/access-group selections and reporting are supplied by the caller,
+    not the process.
     """
-    models = [item.strip() for item in (models or []) if item.strip()]
+    explicit_models = [item.strip() for item in (models or []) if item.strip()]
+    explicit_groups = [item.strip() for item in (access_groups or []) if item.strip()]
+    use_default_access_group = not explicit_models and not explicit_groups and team_id is None
+    requested_groups = [DEFAULT_ACCESS_GROUP] if use_default_access_group else explicit_groups
+
     key_alias = alias or email.split("@")[0]
     report(f"Processing user: {email}")
     user = get_user_by_email(email, base_url=base_url, api_key=api_key)
+    if user is not None and not user.get("user_id"):
+        raise CommandError("LiteLLM user lookup returned no user_id")
+
+    resolved_access_group_ids = (
+        resolve_access_group_ids(requested_groups, base_url=base_url, api_key=api_key)
+        if requested_groups
+        else None
+    )
+
+    if resolved_access_group_ids:
+        user_models: list[str] | None = list(DEFAULT_USER_MODELS)
+        key_models = explicit_models or [NO_DEFAULT_MODELS]
+    else:
+        user_models = explicit_models or None
+        key_models = explicit_models
+
     if user:
-        user_id = user.get("user_id")
-        if not user_id:
-            raise CommandError("LiteLLM user lookup returned no user_id")
+        user_id = user["user_id"]
         report(f"User already exists: {user_id}")
     else:
-        result = create_user(email, models=models or None, base_url=base_url, api_key=api_key)
+        result = create_user(email, models=user_models, base_url=base_url, api_key=api_key)
         user_id = result.get("user_id")
         if not user_id:
             raise CommandError("LiteLLM user creation returned no user_id")
@@ -162,7 +255,8 @@ def create_key_for_user(
         max_budget,
         budget_duration,
         team_id=team_id,
-        models=models,
+        models=key_models,
+        access_group_ids=resolved_access_group_ids,
         base_url=base_url,
         api_key=api_key,
     )

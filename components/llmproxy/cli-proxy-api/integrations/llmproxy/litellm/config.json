@@ -3,7 +3,6 @@
     "cli-proxy-api": {
       "api_base": "http://cli-proxy-api:8317",
       "models_autofill_disabled": true,
-      "access_groups": ["General"],
       "interfaces": {
         "anthropic": {
           "models": {
@@ -72,5 +71,17 @@
     {"a-1-vision,a-2-vision,a-3-vision": ["a-fallback-vision"]},
     {"o-1,o-2,o-3": ["o-fallback"]},
     {"o-1-vision,o-2-vision,o-3-vision": ["o-fallback-vision"]}
-  ]
+  ],
+  "access_groups": {
+    "General": {
+      "description": "Default user access group",
+      "access_model_names": [
+        "claude-*",
+        "$aliases:claude-*",
+        "gpt-*",
+        "$aliases:gpt-*",
+        "codex-auto-review"
+      ]
+    }
+  }
 }

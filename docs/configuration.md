@@ -145,12 +145,18 @@ or change Portainer. Review the diff before the normal generate/sync flow.
 ```bash
 uv run llmproxy llmproxy/litellm config sync --preset default --dry-run
 uv run llmproxy llmproxy/litellm config sync --preset default --only credentials,models
-uv run llmproxy llmproxy/litellm config sync --preset default --only aliases,fallbacks,router_settings,guardrails
+uv run llmproxy llmproxy/litellm config sync --preset default --only aliases,fallbacks,router_settings,general_settings,guardrails,access_groups
 ```
 
-Supported sections are `credentials`, `models`, `aliases`, `fallbacks`, `public_model_hub`, `router_settings`, and `guardrails`.
+Supported sections are `credentials`, `models`, `aliases`, `fallbacks`, `public_model_hub`, `router_settings`, `general_settings`, `guardrails`, and `access_groups`.
 
 Alias keys containing `*` are emitted as LiteLLM object aliases with `hidden: true`; their model target remains routable while the alias is omitted from discovery. Non-wildcard aliases retain their configured representation.
+
+Top-level `general_settings` synchronizes individual LiteLLM `general_settings` fields via `POST /config/field/update` and verifies convergence via `GET /config/field/info`. Fields owned by `litellm.yaml` cannot be overwritten via API and fail preflight before any mutations. Both `router_settings` and `general_settings` merge only declared keys and do not prune undeclared server keys.
+
+Top-level `guardrails` and `access_groups` follow the same three-state authority contract as `models` and `credentials`: omitted or `null` leaves live resources untouched even with `--prune`; an explicit empty `{}` or `[]` authorizes pruning stale live entries when `--prune` is enabled.
+
+Top-level `access_groups` declares LiteLLM Unified Access Groups synchronized through `/v1/access_group`. In `access_model_names`, `$aliases:<pattern>` expands at generation time to all visible (non-hidden) aliases matching `<pattern>`, deduplicated in declaration order; unmatched `$aliases:` refs fail strict generation. Sync updates only the declared group fields and preserves live key and team memberships (`assigned_key_ids` / `assigned_team_ids`). With `--prune`, stale access groups are deleted only if all stale groups have zero assigned keys and zero assigned teams; any live assignment refuses the prune plan before the first delete.
 
 `--dry-run` validates desired configuration resolution and selected-section identities, then stops before live LiteLLM inventory preflight or mutations. It does not compute a live diff, preview creates/updates/deletes or a prune plan, or verify management API connectivity. Configuration resolution may still query provider APIs for model discovery and requires complete provider inputs; dry-run is not an offline guarantee.
 

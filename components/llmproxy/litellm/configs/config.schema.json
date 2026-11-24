@@ -124,8 +124,8 @@
             }
         },
         "guardrails": {
-            "type": ["object", "array"],
-            "description": "LiteLLM guardrails keyed by guardrail_name and managed through the guardrail management API.",
+            "type": ["object", "array", "null"],
+            "description": "LiteLLM guardrails keyed by guardrail_name and managed through the guardrail management API, or null to leave guardrails unchanged.",
             "propertyNames": {
                 "minLength": 1
             },
@@ -140,9 +140,143 @@
             "type": "object",
             "description": "Raw router settings to merge into LiteLLM's /config/update router_settings. Applied after aliases and fallbacks.",
             "additionalProperties": true
+        },
+        "general_settings": {
+            "type": "object",
+            "description": "LiteLLM general_settings fields synchronized through /config/field/update and verified via /config/field/info.",
+            "properties": {
+                "enforce_fallback_model_access": {
+                    "type": "boolean",
+                    "description": "When false, router-configured fallbacks may target fallback deployments not directly granted to the calling key."
+                }
+            },
+            "additionalProperties": true
+        },
+        "access_groups": {
+            "type": ["object", "array", "null"],
+            "description": "LiteLLM Unified Access Groups managed through /v1/access_group, or null to leave access groups unchanged. Object keys supply access_group_name; list form is used in generated config output. Key and team memberships (assigned_key_ids / assigned_team_ids) are preserved live and cannot be set here.",
+            "propertyNames": {
+                "minLength": 1
+            },
+            "additionalProperties": {
+                "$ref": "#/$defs/access_group"
+            },
+            "items": {
+                "$ref": "#/$defs/expanded_access_group"
+            }
         }
     },
     "$defs": {
+        "access_group": {
+            "type": "object",
+            "description": "LiteLLM Unified Access Group definition. access_group_name is supplied by the parent object key.",
+            "properties": {
+                "$delete": {
+                    "$ref": "#/$defs/delete_keys"
+                },
+                "description": {
+                    "type": ["string", "null"],
+                    "description": "Human-readable description for the access group"
+                },
+                "access_model_names": {
+                    "type": "array",
+                    "description": "Allowed model names, aliases, wildcard patterns (e.g. 'claude-*'), or '$aliases:<pattern>' macros that expand to visible matching aliases.",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "access_mcp_server_ids": {
+                    "type": "array",
+                    "description": "Allowed MCP server IDs",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "mcp_tool_permissions": {
+                    "type": "object",
+                    "description": "Per-MCP-server tool allowlists",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                },
+                "access_agent_ids": {
+                    "type": "array",
+                    "description": "Allowed agent IDs",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "access_skill_names": {
+                    "type": "array",
+                    "description": "Allowed skill names",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "expanded_access_group": {
+            "type": "object",
+            "description": "Expanded LiteLLM Unified Access Group payload in generated config output.",
+            "required": ["access_group_name"],
+            "properties": {
+                "access_group_name": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "description": {
+                    "type": ["string", "null"]
+                },
+                "access_model_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "access_mcp_server_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "mcp_tool_permissions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                },
+                "access_agent_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "access_skill_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
         "model_group_alias_target": {
             "type": "object",
             "description": "LiteLLM model group alias target with discovery metadata",

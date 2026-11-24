@@ -71,6 +71,12 @@ def configure(parser):
         help="Comma-separated models assigned to the user and API key",
     )
     parser.add_argument(
+        "--access-group",
+        "--access-groups",
+        dest="access_group",
+        help="Comma-separated Unified Access Group names (default: General when --models and --team-id are omitted)",
+    )
+    parser.add_argument(
         "--rpm-limit",
         "--rpm",
         type=positive_int,
@@ -102,6 +108,7 @@ def run(args, context):
         budget_duration=args.budget_duration,
         team_id=args.team_id,
         models=args.models.split(",") if args.models else None,
+        access_groups=args.access_group.split(",") if args.access_group else None,
         report=lambda message: print(message, file=sys.stderr),
     )
     print(api_key)
